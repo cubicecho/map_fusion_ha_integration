@@ -22,6 +22,9 @@ from homeassistant.helpers import selector
 from . import placements as pl
 from .const import DOMAIN
 from .coordinator import MapFusionManager, PlacementError
+from .model import Rect
+from .preview import async_preview_markdown
+from .render import default_spot
 
 try:  # HA 2026.10+ validates with probatio
     import probatio as vol
@@ -76,6 +79,7 @@ class MapFusionOptionsFlow(OptionsFlow):
     def __init__(self) -> None:
         self._area_id: str | None = None
         self._frame_id: str | None = None
+        self._proposal: Rect | None = None
 
     @property
     def _manager(self) -> MapFusionManager | None:
@@ -109,6 +113,7 @@ class MapFusionOptionsFlow(OptionsFlow):
                 frame_id = user_input.get("frame_id") or None
                 self._frame_id = manager.resolve_frame(area_id, area.floor_id, frame_id)
                 self._area_id = area_id
+                self._proposal = None
                 return await self.async_step_place_rect()
             except PlacementError as err:
                 errors["base"] = "invalid_placement"
@@ -117,6 +122,9 @@ class MapFusionOptionsFlow(OptionsFlow):
         fields: dict[Any, Any] = {vol.Required("area_id"): selector.AreaSelector()}
         if len(frames) > 1:
             fields[vol.Required("frame_id")] = _select(frames)
+        first = next(iter(frames))
+        placeholders["frame"] = frames[first]
+        placeholders["map"] = async_preview_markdown(self.hass, first, title=frames[first])
         return self.async_show_form(
             step_id="place_area",
             data_schema=vol.Schema(fields),
@@ -133,38 +141,78 @@ class MapFusionOptionsFlow(OptionsFlow):
         placeholders = {"error": "", "frame": manager.frame_choices().get(self._frame_id, self._frame_id)}
         if user_input is not None:
             try:
-                ring = pl.rect_ring(
+                pl.rect_ring(user_input["x"], user_input["y"], user_input["width"], user_input["height"])
+                self._proposal = Rect(
                     user_input["x"], user_input["y"], user_input["width"], user_input["height"]
                 )
-                await manager.async_set_area(self._area_id, [ring], self._frame_id)
-                return self.async_create_entry(data={})
+                return await self.async_step_place_preview()
             except pl.InvalidPlacement as err:
                 errors["base"] = "invalid_placement"
                 placeholders["error"] = str(err)
-            except PlacementError as err:
-                errors["base"] = "invalid_placement"
-                placeholders["error"] = str(err)
 
-        current = self._current_rect(manager)
+        start = self._start_rect(manager)
+        placeholders["map"] = self._map(start)
         schema = vol.Schema(
             {
-                vol.Required("x", default=current["x"]): METRES,
-                vol.Required("y", default=current["y"]): METRES,
-                vol.Required("width", default=current["width"]): POSITIVE_METRES,
-                vol.Required("height", default=current["height"]): POSITIVE_METRES,
+                vol.Required("x", default=start.x): METRES,
+                vol.Required("y", default=start.y): METRES,
+                vol.Required("width", default=start.width): POSITIVE_METRES,
+                vol.Required("height", default=start.height): POSITIVE_METRES,
             }
         )
         return self.async_show_form(
             step_id="place_rect", data_schema=schema, errors=errors, description_placeholders=placeholders
         )
 
-    def _current_rect(self, manager: MapFusionManager) -> dict[str, float]:
-        """Start from the area's current shape in this frame, if it has one."""
+    async def async_step_place_preview(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Show the rectangle on the map: save it, or go back and adjust."""
+        assert self._proposal is not None
+        r = self._proposal
+        return self.async_show_menu(
+            step_id="place_preview",
+            menu_options=["place_save", "place_rect"],
+            description_placeholders={
+                "map": self._map(r),
+                "rect": f"{r.width:g} × {r.height:g} m at x {r.x:g}, y {r.y:g}",
+            },
+        )
+
+    async def async_step_place_save(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        manager = self._manager
+        assert manager is not None and self._area_id and self._frame_id and self._proposal
+        r = self._proposal
+        try:
+            ring = pl.rect_ring(r.x, r.y, r.width, r.height)
+            await manager.async_set_area(self._area_id, [ring], self._frame_id)
+        except (pl.InvalidPlacement, PlacementError) as err:
+            return self.async_abort(reason="placement_failed", description_placeholders={"error": str(err)})
+        return self.async_create_entry(data={})
+
+    def _map(self, rect: Rect) -> str:
+        """Markdown image: the frame with `rect` drawn where the area would go."""
+        area = ar.async_get(self.hass).async_get_area(self._area_id or "")
+        return async_preview_markdown(
+            self.hass,
+            self._frame_id,
+            editing=self._area_id,
+            proposal=[pl.rect_ring(rect.x, rect.y, rect.width, rect.height)],
+            title=area.name if area else "",
+        )
+
+    def _start_rect(self, manager: MapFusionManager) -> Rect:
+        """The last rectangle tried, else the area's current box, else a spot beside the map."""
+        if self._proposal is not None:
+            return self._proposal
         frame = manager.fused.frame(self._frame_id) if manager.fused and self._frame_id else None
         area = next((a for a in frame.areas if a.area_id == self._area_id), None) if frame else None
         if area is not None:
-            return area.rect.as_dict()
-        return {"x": 0.0, "y": 0.0, "width": 2.0, "height": 2.0}
+            r = area.rect
+            return Rect(round(r.x, 2), round(r.y, 2), round(r.width, 2), round(r.height, 2))
+        return default_spot(frame)
 
     # Remove a placement -----------------------------------------------------
 

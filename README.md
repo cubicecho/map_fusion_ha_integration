@@ -1,6 +1,6 @@
 # Map Fusion
 
-> **Early development (v0.2).** Expect changes. Feedback and issues welcome.
+> **Early development (v0.3).** Expect changes. Feedback and issues welcome.
 
 Map Fusion is a Home Assistant integration that turns your robot vacuum maps into one floor map, with each room linked to a Home Assistant area. Dashboard cards and other integrations then share one consistent map instead of each parsing vacuum maps on its own.
 
@@ -45,7 +45,7 @@ Manual install: copy `custom_components/map_fusion` into your config's `custom_c
 ## Using it
 
 - **presence-map-card:** add `map_fusion: true` to the card. It draws every room's outline and keeps your sensors.
-- **Place an area by hand:** Settings → Devices & services → Map Fusion → **Configure** → *Place an area on the map* (rectangle in metres from the map's top-left), or the `map_fusion.set_area` service, which also takes polygons.
+- **Place an area by hand:** Settings → Devices & services → Map Fusion → **Configure** → *Place an area on the map*. The dialog shows the map with a 1 m grid; enter x, y, width and height, check the preview (your rectangle in orange among the other rooms), then **Save** or **Adjust**. New areas start just right of the map. The `map_fusion.set_area` service does the same and also takes polygons.
 - **Which room is a point in:** `map_fusion.locate_point` with `x`, `y` in map metres, or in the vacuum's own coordinates with `source_id` (e.g. the robot's position).
 - **Send a vacuum to a spot on the map:** `map_fusion.transform_point` converts map metres to the vacuum's coordinates.
 - **Filled shapes:** add `variant: filled` (card: `map_fusion: { variant: filled }`, services/websocket: `variant: filled`). Set how big a gap counts as furniture under Configure → *Filled room shapes* (default 2 m).

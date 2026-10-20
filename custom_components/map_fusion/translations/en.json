@@ -29,7 +29,7 @@
       },
       "place_area": {
         "title": "Place an area",
-        "description": "Pick the area to place. Use this for areas no vacuum room covers, or to replace a vacuum room's shape.",
+        "description": "Pick the area to place. Use this for areas no vacuum room covers, or to replace a vacuum room's shape.\n\n{map}\n\n*{frame}. Grid lines are 1 m apart.*",
         "data": {
           "area_id": "Area",
           "frame_id": "Map"
@@ -37,7 +37,7 @@
       },
       "place_rect": {
         "title": "Area rectangle",
-        "description": "Position and size in metres on {frame}. x goes right and y goes down from the map's top-left corner.",
+        "description": "Position and size in metres on {frame}: x goes right and y goes down; read them off the grid. Orange is where the area goes with the numbers below; a dashed blue outline is its current shape.\n\n{map}",
         "data": {
           "x": "x",
           "y": "y",
@@ -66,6 +66,14 @@
         "data": {
           "fill_max_m": "Largest furniture to fill"
         }
+      },
+      "place_preview": {
+        "title": "Check the placement",
+        "description": "{rect}\n\n{map}",
+        "menu_options": {
+          "place_save": "Save",
+          "place_rect": "Adjust"
+        }
       }
     },
     "error": {
@@ -76,7 +84,8 @@
       "no_frames": "There's no map to place areas on yet. Link a vacuum's rooms to areas, or create a floor.",
       "no_placements": "No areas have been placed by hand.",
       "no_maps": "No vacuum maps found yet.",
-      "floor_missing": "That floor no longer exists."
+      "floor_missing": "That floor no longer exists.",
+      "placement_failed": "Couldn't place it: {error}"
     }
   },
   "services": {

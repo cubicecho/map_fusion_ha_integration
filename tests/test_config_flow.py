@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
@@ -48,6 +49,12 @@ async def test_options_place_and_clear_an_area(
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"x": 1, "y": 2, "width": 3, "height": 4}
     )
+    # A preview with the rectangle on the map: save or adjust.
+    assert result["type"] is FlowResultType.MENU
+    assert result["step_id"] == "place_preview"
+    assert result["menu_options"] == ["place_save", "place_rect"]
+    assert result["description_placeholders"]["rect"] == "3 × 4 m at x 1, y 2"
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "place_save"})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert manager.placements[FRAME_ID][areas["Garage"]] == [[(1, 2), (4, 2), (4, 6), (1, 6)]]
 
@@ -100,3 +107,41 @@ async def test_options_need_a_loaded_entry(hass: HomeAssistant) -> None:
     entry.add_to_hass(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["reason"] == "not_loaded"
+
+
+async def test_options_place_shows_the_map_and_can_adjust(
+    hass: HomeAssistant, hass_client_no_auth, areas: dict[str, str], ready: Any
+) -> None:
+    result = await _menu(hass, ready, "place_area")
+    image = result["description_placeholders"]["map"]
+    assert image.startswith("![Map preview](/api/map_fusion/preview/") and "authSig=" in image
+
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"area_id": areas["Garage"]})
+    # A new area starts just right of the map, so it's easy to spot.
+    frame = ready.runtime_data.fused.frame(FRAME_ID)
+    defaults = {str(k): k.default() for k in result["data_schema"].schema}
+    assert defaults["x"] == pytest.approx(frame.bounds.x + frame.bounds.width + 0.5, abs=0.1)
+    assert defaults["y"] == pytest.approx(frame.bounds.y, abs=0.1)
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"x": 1, "y": 2, "width": 3, "height": 4}
+    )
+    url = result["description_placeholders"]["map"].removeprefix("![Map preview](").removesuffix(")")
+
+    # The signed link works without logging in (it's an <img> in the dialog).
+    client = await hass_client_no_auth()
+    resp = await client.get(url)
+    assert resp.status == 200
+    assert resp.headers["Content-Type"].startswith("image/svg+xml")
+    svg = await resp.text()
+    assert 'class="proposal"' in svg and "3 × 4 m at (1, 2)" in svg and "Garage" in svg
+    assert "Kitchen" in svg  # the other areas, for reference
+    # Without the signature it's refused.
+    assert (await client.get(url.split("?")[0])).status == 401
+
+    # Adjust goes back to the numbers, starting from what was tried.
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "place_rect"})
+    assert result["step_id"] == "place_rect"
+    defaults = {str(k): k.default() for k in result["data_schema"].schema}
+    assert defaults == {"x": 1, "y": 2, "width": 3, "height": 4}
+    hass.config_entries.options.async_abort(result["flow_id"])

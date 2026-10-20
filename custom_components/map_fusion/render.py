@@ -7,6 +7,7 @@ coordinates, in the format Xiaomi Vacuum Map Card uses.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 from xml.sax.saxutils import escape
@@ -119,3 +120,108 @@ def attributes(frame: FusedFrame, rendered: RenderedFrame, version: int) -> dict
         "map_to_image": rendered.to_image.as_list(),
         "calibration_points": rendered.calibration_points,
     }
+
+
+# Editing preview -------------------------------------------------------------------
+
+PREVIEW_PX_PER_M = 40
+PREVIEW_MARGIN_M = 1.0
+
+
+def render_preview(
+    frame: FusedFrame | None,
+    *,
+    editing: str | None = None,
+    proposal: list[Ring] | None = None,
+    title: str = "",
+) -> bytes:
+    """The map for placing an area by hand, as SVG.
+
+    - A metre grid with coordinate labels, so x/y/width/height can be read off.
+    - Other areas faint and labelled, unlinked vacuum rooms dashed.
+    - The area being edited (`editing`) dashed in its current shape.
+    - The `proposal` (the shape about to be saved) in a strong colour, with
+      its rectangle written out.
+    """
+    areas = [a for a in (frame.areas if frame else []) if a.area_id != editing]
+    current = next((a for a in (frame.areas if frame else []) if a.area_id == editing), None)
+    rooms = frame.unmapped_rooms if frame else []
+    pts: list[Point] = [p for a in (frame.areas if frame else []) for r in a.polygons for p in r]
+    pts += [(p[0], p[1]) for room in rooms for r in room["polygons"] for p in r]
+    pts += [p for r in proposal or [] for p in r]
+    box = Rect.from_points(pts) if pts else Rect(0, 0, 4, 4)
+    # Whole metres around everything, plus a margin to place things beside the map.
+    x0 = math.floor(box.x - PREVIEW_MARGIN_M)
+    y0 = math.floor(box.y - PREVIEW_MARGIN_M)
+    x1 = math.ceil(box.x + box.width + PREVIEW_MARGIN_M)
+    y1 = math.ceil(box.y + box.height + PREVIEW_MARGIN_M)
+    gutter = 28  # px for axis labels
+    scale = PREVIEW_PX_PER_M
+    to_image = Transform(a=scale, d=scale, tx=gutter - x0 * scale, ty=gutter - y0 * scale)
+    width = gutter + (x1 - x0) * scale + 8
+    height = gutter + (y1 - y0) * scale + 8
+    step = 1 if max(x1 - x0, y1 - y0) <= 20 else 2
+
+    style = (
+        ".bg{fill:#fff}.grid{stroke:#e0e0e0;stroke-width:1}.axis{stroke:#9e9e9e;stroke-width:1.5}"
+        ".tick{font:11px sans-serif;fill:#616161}"
+        ".room{stroke:#9e9e9e;stroke-width:1;fill:#eceff1}"
+        ".unlinked{fill:none;stroke:#bdbdbd;stroke-dasharray:4 3}"
+        ".current{fill:none;stroke:#1565c0;stroke-width:2;stroke-dasharray:6 4}"
+        ".proposal{fill:#ff9800;fill-opacity:.45;stroke:#e65100;stroke-width:2.5}"
+        ".label{font:12px sans-serif;fill:#424242;text-anchor:middle;dominant-baseline:middle;"
+        "paint-order:stroke;stroke:#fff;stroke-width:3px}"
+        ".plabel{font:bold 13px sans-serif;fill:#bf360c;text-anchor:middle;dominant-baseline:middle;"
+        "paint-order:stroke;stroke:#fff;stroke-width:3px}"
+    )
+    svg_open = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+        f'viewBox="0 0 {width} {height}">'
+    )
+    out = [
+        svg_open,
+        f"<title>{escape(title)}</title>",
+        f"<style>{style}</style>",
+        f'<rect class="bg" width="{width}" height="{height}"/>',
+    ]
+    for gx in range(x0, x1 + 1):
+        px, _ = to_image.apply((gx, 0))
+        cls = "axis" if gx == 0 else "grid"
+        out.append(f'<line class="{cls}" x1="{px:.1f}" y1="{gutter}" x2="{px:.1f}" y2="{height - 8}"/>')
+        if (gx - x0) % step == 0:
+            out.append(f'<text class="tick" x="{px:.1f}" y="{gutter - 8}" text-anchor="middle">{gx}</text>')
+    for gy in range(y0, y1 + 1):
+        _, py = to_image.apply((0, gy))
+        cls = "axis" if gy == 0 else "grid"
+        out.append(f'<line class="{cls}" x1="{gutter}" y1="{py:.1f}" x2="{width - 8}" y2="{py:.1f}"/>')
+        if (gy - y0) % step == 0:
+            out.append(f'<text class="tick" x="{gutter - 4}" y="{py + 4:.1f}" text-anchor="end">{gy}</text>')
+    out.append('<text class="tick" x="4" y="11">m</text>')
+
+    for room in rooms:
+        rings = [[(p[0], p[1]) for p in ring] for ring in room["polygons"]]
+        out.append(f'<path class="unlinked" d="{_path(rings, to_image)}"/>')
+    for area in areas:
+        out.append(f'<path class="room" d="{_path(area.polygons, to_image)}"/>')
+    for area in areas:
+        x, y = to_image.apply(area.label_point)
+        out.append(f'<text class="label" x="{x:.1f}" y="{y:.1f}">{escape(area.name)}</text>')
+    if current is not None:
+        out.append(f'<path class="current" d="{_path(current.polygons, to_image)}"/>')
+    if proposal:
+        out.append(f'<path class="proposal" d="{_path(proposal, to_image)}"/>')
+        r = Rect.from_points([p for ring in proposal for p in ring])
+        cx, cy = to_image.apply((r.x + r.width / 2, r.y + r.height / 2))
+        text = f"{r.width:g} × {r.height:g} m at ({r.x:g}, {r.y:g})"
+        out.append(f'<text class="plabel" x="{cx:.1f}" y="{cy:.1f}">{escape(title)}</text>')
+        out.append(f'<text class="plabel" x="{cx:.1f}" y="{cy + 16:.1f}">{escape(text)}</text>')
+    out.append("</svg>")
+    return "".join(out).encode()
+
+
+def default_spot(frame: FusedFrame | None, width: float = 3.0, height: float = 3.0) -> Rect:
+    """Where a new area starts: just right of the map, top-aligned, easy to spot."""
+    if frame is None or frame.bounds is None:
+        return Rect(0.0, 0.0, width, height)
+    b = frame.bounds
+    return Rect(round(b.x + b.width + 0.5, 1), round(b.y, 1), width, height)

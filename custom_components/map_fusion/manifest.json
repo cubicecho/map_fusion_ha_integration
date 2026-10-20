@@ -7,6 +7,7 @@
   "config_flow": true,
   "dependencies": [
     "camera",
+    "http",
     "vacuum"
   ],
   "documentation": "https://github.com/cubicecho/map_fusion_ha_integration",
@@ -15,5 +16,5 @@
   "issue_tracker": "https://github.com/cubicecho/map_fusion_ha_integration/issues",
   "requirements": [],
   "single_config_entry": true,
-  "version": "0.2.0"
+  "version": "0.3.0"
 }

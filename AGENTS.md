@@ -39,7 +39,8 @@ custom_components/map_fusion/
   services.py        # set_area, clear_area; response-only get_map, transform_point, locate_point (services.yaml)
   queries.py         # find frame, locate point, frame ↔ vacuum transforms, document (pure)
   render.py          # frame → SVG + calibration points (pure)
-  image.py           # image platform: one SVG image entity per frame
+  image.py           # image platform: SVG image entities per frame (traced + filled)
+  preview.py         # signed-URL SVG previews for the options flow (place an area)
   align.py           # line a second vacuum's map up with the anchor (rigid fit on shared areas, pure)
   sources/
     __init__.py      # ADAPTERS: kind → adapter module
