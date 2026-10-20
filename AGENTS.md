@@ -46,8 +46,8 @@ custom_components/map_fusion/
   panel.py           # registers the sidebar page (/map-fusion, admin) and serves frontend/
   frontend/          # built panel bundle (committed; source in /frontend)
 frontend/            # the sidebar page: vanilla TS web component, esbuild → custom_components/map_fusion/frontend/
-  src/panel.ts       # <map-fusion-panel>: map, drag/resize, fields, save/remove over websocket
-  src/geometry.ts    # pure editing maths (drag, snap, view, hit tests)
+  src/panel.ts       # <map-fusion-panel>: map, rect + polygon editing, fields, save/remove over websocket
+  src/geometry.ts    # pure editing maths (drag, snap, view, hit tests, polygon corners/crossings/simplify)
   align.py           # line a second vacuum's map up with the anchor (rigid fit on shared areas, pure)
   sources/
     __init__.py      # ADAPTERS: kind → adapter module

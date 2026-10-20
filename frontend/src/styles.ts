@@ -77,6 +77,12 @@ export const STYLES = `
   vector-effect: non-scaling-stroke;
   cursor: move;
 }
+path.draft { stroke-linejoin: round; }
+.draft.invalid { fill: #f44336; stroke: #b71c1c; }
+.vertex { fill: #fff; stroke: #e65100; stroke-width: 2; vector-effect: non-scaling-stroke; cursor: grab; }
+.vertex.selected { fill: #e65100; stroke: #fff; }
+.midpoint { fill: #e65100; fill-opacity: 0.55; stroke: #fff; stroke-width: 1; vector-effect: non-scaling-stroke; cursor: copy; }
+.midpoint:hover { fill-opacity: 1; }
 .handle { fill: #fff; stroke: #e65100; stroke-width: 2; vector-effect: non-scaling-stroke; }
 .handle-n, .handle-s { cursor: ns-resize; }
 .handle-e, .handle-w { cursor: ew-resize; }
@@ -129,6 +135,41 @@ h3 { margin: 16px 0 6px; font-size: 13px; font-weight: 500; color: var(--seconda
   width: 100%;
   box-sizing: border-box;
 }
+.segmented { display: inline-flex; margin-top: 12px; border: 1px solid var(--primary-color); border-radius: 16px; overflow: hidden; }
+.seg {
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 14px;
+  border: none;
+  background: transparent;
+  color: var(--primary-color);
+  cursor: pointer;
+}
+.seg + .seg { border-left: 1px solid var(--primary-color); }
+.seg.active { background: var(--primary-color); color: var(--text-primary-color, #fff); }
+.seg:disabled { opacity: 0.5; cursor: default; }
+.vertices { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; max-height: 280px; overflow-y: auto; }
+.vertex-row { display: grid; grid-template-columns: 22px 1fr 1fr 28px; gap: 6px; align-items: center; border-radius: 6px; }
+.vertex-row.head { font-size: 12px; color: var(--secondary-text-color); }
+.vertex-row.selected { background: color-mix(in srgb, #ff9800 18%, transparent); }
+.vertex-index { font-size: 12px; color: var(--secondary-text-color); text-align: center; }
+.fields .vertex-row input { font-size: 14px; padding: 4px 6px; }
+.icon-btn {
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--secondary-text-color);
+  cursor: pointer;
+}
+.icon-btn:hover:not(:disabled) { background: var(--secondary-background-color, #eee); color: var(--error-color, #db4437); }
+.icon-btn:disabled { opacity: 0.3; cursor: default; }
+.readout { font-size: 13px; color: var(--secondary-text-color); margin-top: 4px; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .btn {
   font: inherit;
