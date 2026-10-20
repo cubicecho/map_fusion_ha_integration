@@ -196,4 +196,24 @@ h3 { margin: 16px 0 6px; font-size: 13px; font-weight: 500; color: var(--seconda
   cursor: pointer;
 }
 .item.active { border-color: var(--primary-color); color: var(--primary-color); font-weight: 500; }
+/* Doors, windows, … */
+.feature-line { stroke: #757575; stroke-width: 6px; vector-effect: non-scaling-stroke; stroke-linecap: butt; pointer-events: none; }
+.feature.door .feature-line { stroke: #6d4c41; }
+.feature.window .feature-line { stroke: #0288d1; stroke-width: 5px; }
+.feature.open .feature-line { stroke: #e53935; }
+.feature-glass { stroke: #e1f5fe; stroke-width: 1.5px; vector-effect: non-scaling-stroke; pointer-events: none; }
+.feature.editing .feature-line { stroke-width: 8px; }
+.feature-hit { stroke: transparent; stroke-width: 18px; vector-effect: non-scaling-stroke; cursor: pointer; pointer-events: stroke; }
+.feature-body { cursor: move; }
+.feature-end { cursor: grab; }
+.feature-item::before { content: ""; display: inline-block; width: 10px; height: 4px; margin-right: 6px; vertical-align: middle; background: #757575; border-radius: 1px; }
+.feature-item.door::before { background: #6d4c41; }
+.feature-item.window::before { background: #0288d1; }
+.feature-item.open::before { background: #e53935; }
+.fields label.wide { grid-column: 1 / -1; }
+.fields label.check, .feature-areas label.check { flex-direction: row; align-items: center; gap: 8px; grid-column: 1 / -1; font-size: 13px; color: var(--primary-text-color); }
+.fields label.check input, .feature-areas label.check input { width: auto; }
+.feature-areas { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.feature-areas label.check { display: flex; }
+.area-checks { display: flex; flex-wrap: wrap; gap: 4px 14px; }
 `;

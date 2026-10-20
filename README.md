@@ -1,6 +1,6 @@
 # Map Fusion
 
-> **Early development (v0.4).** Expect changes. Feedback and issues welcome.
+> **Early development (v0.5).** Expect changes. Feedback and issues welcome.
 
 Map Fusion is a Home Assistant integration that turns your robot vacuum maps into one floor map, with each room linked to a Home Assistant area. Dashboard cards and other integrations then share one consistent map instead of each parsing vacuum maps on its own.
 
@@ -8,6 +8,7 @@ Map Fusion is a Home Assistant integration that turns your robot vacuum maps int
 - **Rooms are HA areas.** It reuses the room → area links you set in the vacuum's settings (Home Assistant 2026.3+).
 - **Several vacuums on one floor are lined up** into one map, using the areas they both know.
 - **Filled room shapes:** a second version of each room with furniture gaps (beds, wardrobes, islands) filled in, closer to the real walls.
+- **Doors and windows** on the map, linked to their contact sensors or covers, so the map shows what's open.
 - **Place areas by hand** that no vacuum covers (garage, porch, upstairs), as a rectangle or polygon.
 - **For cards and automations:** a websocket API, services (`get_map`, `locate_point`, `transform_point`, `set_area`, `clear_area`) and a map image entity per floor.
 
@@ -47,6 +48,7 @@ Manual install: copy `custom_components/map_fusion` into your config's `custom_c
 - **presence-map-card:** add `map_fusion: true` to the card. It draws every room's outline and keeps your sensors.
 - **Place an area by hand:** open **Map Fusion** in the sidebar (admins). Pick an area, then drag its rectangle into place, or drag a corner or edge to resize it. The x, y, width and height fields follow as you drag, and typing in them moves the rectangle straight away. Arrow keys nudge it (Shift + arrows resize), with snapping from 1 cm to 50 cm. It warns when the rectangle overlaps another area. **Save** stores it; **Remove placement** goes back to the vacuum's shape. Vacuum rooms can be replaced with a rectangle the same way.
   - For other shapes, switch the editor to **Polygon**: drag a corner (hold Shift to line it up with its neighbour), drag the shape to move it, click or drag the dot in the middle of an edge to add a corner, and double-click a corner (or select it and press Delete, or use its × in the list) to remove it. Each corner has x and y fields, and the area in m² is shown. The page warns, and won't save, while the outline crosses itself. **Replace with a polygon** starts a vacuum room from its traced outline, simplified to a handful of corners.
+- **Doors and windows:** on the same page, **Add door** / **Add window**, then drag its ends onto a wall (they snap to room edges) or drag the line to move it. Link the sensor or cover that says whether it's open (matching ones are suggested first). Map Fusion works out which areas it joins from the rooms on each side, or you pick them. Open ones show red on the page and the map images. Also: `map_fusion.set_feature` / `remove_feature` and websocket `map_fusion/feature/set` / `remove`.
   - Without the sidebar: Settings → Devices & services → Map Fusion → **Configure** → *Place an area on the map* (numbers plus a preview image), or the `map_fusion.set_area` service, which also takes polygons.
 - **Which room is a point in:** `map_fusion.locate_point` with `x`, `y` in map metres, or in the vacuum's own coordinates with `source_id` (e.g. the robot's position).
 - **Send a vacuum to a spot on the map:** `map_fusion.transform_point` converts map metres to the vacuum's coordinates.

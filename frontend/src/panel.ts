@@ -8,6 +8,11 @@
  * `polygons`), Remove calls map_fusion/area/clear. The map updates from
  * map_fusion/subscribe.
  *
+ * Doors, windows and other features (feature_kinds in the document) are
+ * listed too: add one, drag its ends (they snap onto room edges), link an
+ * entity, Save (map_fusion/feature/set) or Delete (feature/remove). Their
+ * colours follow the linked entity's open/closed state.
+ *
  * Structure is rebuilt when the document, frame, variant, selection or
  * shape mode changes. Drags only touch the draft and the number fields
  * (and the corner list when a corner is added or removed).
@@ -26,6 +31,8 @@ import {
   intersectionArea,
   isRectangle,
   largestRing,
+  nearestOnRings,
+  openState,
   pointInRing,
   rectRing,
   removeVertex,
@@ -35,7 +42,10 @@ import {
   ringProblem,
   ringsOverlap,
   ringsPath,
+  segmentLength,
+  segmentSides,
   setVertex,
+  snap,
   snapRect,
   translateRing,
   union,
@@ -45,7 +55,7 @@ import {
   type Rect,
 } from "./geometry.js";
 import { STYLES } from "./styles.js";
-import type { FusedArea, FusedDoc, FusedFrame, Hass } from "./types.js";
+import type { FeatureKind, FusedArea, FusedDoc, FusedFeature, FusedFrame, Hass } from "./types.js";
 
 const SVG = "http://www.w3.org/2000/svg";
 const SNAP_STEPS = [0.01, 0.05, 0.1, 0.25, 0.5];
@@ -74,6 +84,29 @@ interface Drag {
   pointerId: number;
   moved: boolean;
 }
+
+/** A door/window/… being edited. `feature_id` null: not saved yet. */
+interface FeatureDraft {
+  feature_id: string | null;
+  kind: string;
+  points: [Pair, Pair];
+  name: string;
+  entity_id: string | null;
+  /** null: work out the areas from the map. */
+  areas: string[] | null;
+}
+
+interface FeatureDrag {
+  /** Which end (0, 1), or -1 for the whole line. */
+  end: number;
+  start: [Pair, Pair];
+  from: Pair;
+  pointerId: number;
+}
+
+/** Ends snap onto a room edge within this many screen pixels. */
+const WALL_SNAP_PX = 14;
+const NEW_FEATURE = "new";
 
 /** Two presses on the same corner within this many ms remove it. */
 const DOUBLE_PRESS_MS = 400;
@@ -147,6 +180,21 @@ export class MapFusionPanel extends HTMLElement {
   private view: Rect = { x: 0, y: 0, width: 8, height: 6 };
   private drag: Drag | null = null;
 
+  // Features (doors, windows, …)
+  private selectedFeature: string | null = null;
+  private featureDraft: FeatureDraft | null = null;
+  private featureDirty = false;
+  private featureDrag: FeatureDrag | null = null;
+  private wallSnap = true;
+  private featureInputs: HTMLInputElement[] = [];
+  private featureLength: HTMLElement | null = null;
+  private featureAreasNote: HTMLElement | null = null;
+  private featureSave: HTMLButtonElement | null = null;
+  /** Just saved: keep it selected until the updated map (with it) arrives. */
+  private awaitingFeature: string | null = null;
+  /** Linked entities' states last drawn, to redraw when a door opens. */
+  private statesKey = "";
+
   // Built once.
   private frameSelect!: HTMLSelectElement;
   private variantSelect!: HTMLSelectElement;
@@ -172,6 +220,9 @@ export class MapFusionPanel extends HTMLElement {
     this.hassObj = hass;
     if (this.menuButton) this.menuButton.hass = hass;
     if (first) this.render();
+    else if (this.built && this.featureStatesKey() !== this.statesKey && !this.drag && !this.featureDrag) {
+      this.renderMap(this.frame()); // a linked door or window opened or closed
+    }
     this.subscribe();
   }
 
@@ -350,6 +401,15 @@ export class MapFusionPanel extends HTMLElement {
     if (this.vertex !== null && (!this.draft || this.draft.kind !== "polygon" || this.vertex >= this.draft.ring.length)) {
       this.vertex = null;
     }
+    if (this.selectedFeature && this.selectedFeature !== NEW_FEATURE) {
+      const saved = this.features(frame).find((f) => f.feature_id === this.selectedFeature);
+      if (saved) {
+        if (saved.feature_id === this.awaitingFeature) this.awaitingFeature = null;
+        if (!this.featureDirty) this.featureDraft = this.featureToDraft(saved);
+      } else if (this.selectedFeature !== this.awaitingFeature) {
+        this.clearFeature(); // deleted (here or elsewhere)
+      }
+    }
 
     this.renderMap(frame);
     this.renderSide(frame);
@@ -372,7 +432,9 @@ export class MapFusionPanel extends HTMLElement {
       for (const r of frame.unmapped_rooms) rects.push(r.rect);
     }
     if (this.draft) rects.push(draftBounds(this.draft));
-    if (!this.drag) this.view = viewBounds(rects);
+    for (const f of this.features(frame)) rects.push(ringBounds(f.points));
+    if (this.featureDraft) rects.push(ringBounds(this.featureDraft.points));
+    if (!this.drag && !this.featureDrag) this.view = viewBounds(rects);
     const v = this.view;
     this.svg.setAttribute("viewBox", `${v.x} ${v.y} ${v.width} ${v.height}`);
 
@@ -424,7 +486,86 @@ export class MapFusionPanel extends HTMLElement {
       t.textContent = a.name;
       g.append(t);
     }
+    this.statesKey = this.featureStatesKey();
+    for (const f of this.features(frame)) {
+      if (f.feature_id === this.selectedFeature) continue; // the draft shows it
+      g.append(this.featureLine(f.kind, f.points, this.featureState(f.entity_id), f.name || this.kindName(f.kind)));
+      // A wide invisible line on top makes it easy to click.
+      const hit = svgEl("line", {
+        x1: f.points[0]![0],
+        y1: f.points[0]![1],
+        x2: f.points[1]![0],
+        y2: f.points[1]![1],
+        class: "feature-hit",
+      });
+      hit.setAttribute("data-feature", f.feature_id);
+      g.append(hit);
+    }
     this.renderDraft();
+  }
+
+  // -- Features: drawing --------------------------------------------------
+
+  private features(frame: FusedFrame | null): FusedFeature[] {
+    return (frame && frame.features) || [];
+  }
+
+  private kinds(): Record<string, FeatureKind> {
+    return (this.doc && this.doc.feature_kinds) || {};
+  }
+
+  private kindName(kind: string): string {
+    const k = this.kinds()[kind];
+    return k ? k.name : kind;
+  }
+
+  private featureState(entityId: string | null): string {
+    const states = this.hassObj && this.hassObj.states;
+    const st = entityId && states ? states[entityId] : undefined;
+    return openState(entityId, st ? st.state : undefined);
+  }
+
+  private featureStatesKey(): string {
+    return this.features(this.frame())
+      .map((f) => `${f.feature_id}=${this.featureState(f.entity_id)}`)
+      .join(",");
+  }
+
+  private featureLine(kind: string, points: Pair[], state: string, title: string, extra = ""): SVGElement {
+    const [a, b] = [points[0]!, points[1]!];
+    const g = svgEl("g", { class: `feature ${kind} ${state}${extra}` });
+    g.append(svgEl("line", { x1: a[0], y1: a[1], x2: b[0], y2: b[1], class: "feature-line" }));
+    if (kind === "window") g.append(svgEl("line", { x1: a[0], y1: a[1], x2: b[0], y2: b[1], class: "feature-glass" }));
+    const t = svgEl("title");
+    t.textContent = title;
+    g.append(t);
+    return g;
+  }
+
+  private renderFeatureDraft(g: SVGGElement): void {
+    const f = this.featureDraft;
+    if (!f) return;
+    const u = this.unitsPerPx();
+    const [a, b] = f.points;
+    const line = this.featureLine(f.kind, f.points, this.featureState(f.entity_id), f.name || this.kindName(f.kind), " editing");
+    g.append(line);
+    const body = svgEl("line", { x1: a[0], y1: a[1], x2: b[0], y2: b[1], class: "feature-hit feature-body" });
+    body.setAttribute("data-feature-body", "1");
+    g.append(body);
+    f.points.forEach((p, i) => {
+      const end = svgEl("circle", { cx: p[0], cy: p[1], r: u * 6.5, class: "vertex feature-end" });
+      end.setAttribute("data-end", String(i));
+      g.append(end);
+    });
+    const label = svgEl("text", {
+      x: (a[0] + b[0]) / 2,
+      y: (a[1] + b[1]) / 2 - u * 14,
+      class: "draft-label",
+      "font-size": u * 13,
+      "stroke-width": u * 3,
+    });
+    label.textContent = `${f.name || this.kindName(f.kind)} · ${fmt(segmentLength(a, b))} m`;
+    g.append(label);
   }
 
   /** Metres per screen pixel (for sizes that should look the same at any zoom). */
@@ -438,6 +579,7 @@ export class MapFusionPanel extends HTMLElement {
   private renderDraft(): void {
     const g = this.draftLayer;
     g.innerHTML = "";
+    this.renderFeatureDraft(g);
     const d = this.draft;
     if (!d) return;
     const u = this.unitsPerPx();
@@ -519,6 +661,10 @@ export class MapFusionPanel extends HTMLElement {
     this.areaReadout = null;
     this.warning = null;
     this.saveButton = null;
+    this.featureInputs = [];
+    this.featureLength = null;
+    this.featureAreasNote = null;
+    this.featureSave = null;
 
     if (this.loadError) {
       side.append(el("div", "error", this.loadError));
@@ -534,8 +680,9 @@ export class MapFusionPanel extends HTMLElement {
     }
 
     const entry = this.entry();
-    if (entry) side.append(this.editor(entry));
-    else side.append(el("div", "hint", "Pick an area below, or click one on the map. Hand-placed and unplaced areas can be dragged into place."));
+    if (this.featureDraft) side.append(this.featureEditor(frame, this.featureDraft));
+    else if (entry) side.append(this.editor(entry));
+    else side.append(el("div", "hint", "Pick an area below, or click one on the map. Hand-placed and unplaced areas can be dragged into place. Doors and windows are listed below the areas."));
 
     const groups: Array<[string, Kind[]]> = [
       ["Not on the map yet", ["unplaced"]],
@@ -557,6 +704,426 @@ export class MapFusionPanel extends HTMLElement {
       }
       side.append(list);
     }
+    this.featureList(side, frame);
+  }
+
+  // -- Features: side column -------------------------------------------------
+
+  private featureList(side: HTMLElement, frame: FusedFrame): void {
+    const kinds = this.kinds();
+    const kindKeys = Object.keys(kinds);
+    if (!kindKeys.length) return; // Map Fusion before 0.5
+    side.append(el("h3", undefined, kindKeys.map((k) => kinds[k]!.name + "s").join(" & ")));
+    const list = el("div", "list");
+    const counts: Record<string, number> = {};
+    for (const f of this.features(frame)) {
+      counts[f.kind] = (counts[f.kind] || 0) + 1;
+      const label = f.name || `${this.kindName(f.kind)} ${counts[f.kind]}`;
+      const b = el("button", `item feature-item ${f.kind} ${this.featureState(f.entity_id)}` + (f.feature_id === this.selectedFeature ? " active" : ""), label);
+      b.type = "button";
+      b.setAttribute("data-select-feature", f.feature_id);
+      b.addEventListener("click", () => this.selectFeature(f.feature_id));
+      list.append(b);
+    }
+    side.append(list);
+    const actions = el("div", "actions");
+    for (const k of kindKeys) {
+      actions.append(this.button(`Add ${kinds[k]!.name.toLowerCase()}`, `add-${k}`, false, () => this.addFeature(k)));
+    }
+    side.append(actions);
+  }
+
+  private featureEditor(frame: FusedFrame, f: FeatureDraft): HTMLElement {
+    const box = el("div", "editor");
+    const kinds = this.kinds();
+    const kind = kinds[f.kind];
+    box.append(el("h2", undefined, f.name || (f.feature_id ? this.kindName(f.kind) : `New ${this.kindName(f.kind).toLowerCase()}`)));
+    box.append(
+      el("div", "hint small", "Drag either end onto a wall (it snaps to room edges), or drag the line to move it. Arrow keys move it too."),
+    );
+
+    const fields = el("div", "fields");
+    const kindLabel = el("label");
+    kindLabel.append(el("span", undefined, "Kind"));
+    const kindSelect = el("select");
+    kindSelect.setAttribute("data-feature-field", "kind");
+    for (const k of Object.keys(kinds)) {
+      const o = el("option", undefined, kinds[k]!.name);
+      o.value = k;
+      o.selected = k === f.kind;
+      kindSelect.append(o);
+    }
+    kindSelect.addEventListener("change", () => {
+      const next = { ...f, kind: kindSelect.value };
+      // An entity that doesn't fit the new kind is dropped.
+      if (next.entity_id && !this.entityFits(kindSelect.value, next.entity_id)) next.entity_id = null;
+      this.featureDraft = next;
+      this.featureDirty = true;
+      this.render();
+    });
+    kindLabel.append(kindSelect);
+    fields.append(kindLabel);
+
+    const nameLabel = el("label");
+    nameLabel.append(el("span", undefined, "Name (optional)"));
+    const name = el("input");
+    name.type = "text";
+    name.value = f.name;
+    name.placeholder = kind ? kind.name : "";
+    name.setAttribute("data-feature-field", "name");
+    name.addEventListener("input", () => {
+      if (!this.featureDraft) return;
+      this.featureDraft = { ...this.featureDraft, name: name.value };
+      this.featureChanged();
+    });
+    nameLabel.append(name);
+    fields.append(nameLabel);
+
+    const entityLabel = el("label", "wide");
+    entityLabel.append(el("span", undefined, "Linked entity (open / closed)"));
+    entityLabel.append(this.entitySelect(f));
+    fields.append(entityLabel);
+
+    const coords: Array<[string, number, number]> = [
+      ["End 1 x", 0, 0],
+      ["End 1 y", 0, 1],
+      ["End 2 x", 1, 0],
+      ["End 2 y", 1, 1],
+    ];
+    for (const [text, end, axis] of coords) {
+      const label = el("label");
+      label.append(el("span", undefined, `${text} (m)`));
+      const input = this.numberInput(fmt(f.points[end]![axis]!));
+      input.setAttribute("data-feature-point", `${end}:${axis}`);
+      input.addEventListener("input", () => this.onFeaturePoint(end, axis, input.value));
+      label.append(input);
+      fields.append(label);
+      this.featureInputs.push(input);
+    }
+    const snapLabel = el("label", "check");
+    const snapBox = el("input");
+    snapBox.type = "checkbox";
+    snapBox.checked = this.wallSnap;
+    snapBox.setAttribute("data-feature-field", "wall-snap");
+    snapBox.addEventListener("change", () => (this.wallSnap = snapBox.checked));
+    snapLabel.append(snapBox, el("span", undefined, "Snap ends to walls"));
+    fields.append(snapLabel);
+    box.append(fields);
+
+    this.featureLength = el("div", "readout");
+    box.append(this.featureLength);
+    box.append(this.featureAreas(frame, f, kind));
+    this.updateFeatureReadouts();
+
+    const actions = el("div", "actions");
+    this.featureSave = this.button("Save", "save-feature", true, () => this.saveFeature());
+    this.featureSave.disabled = !this.canSaveFeature();
+    actions.append(this.featureSave);
+    actions.append(this.button(f.feature_id ? "Undo changes" : "Cancel", "cancel-feature", false, () => this.cancelFeature()));
+    if (f.feature_id) actions.append(this.button("Delete", "delete-feature", false, () => this.deleteFeature(), true));
+    box.append(actions);
+    if (this.status) box.append(el("div", "status", this.status));
+    return box;
+  }
+
+  /** Entities that fit the kind: matching device classes first, then the rest of those domains. */
+  private entitySelect(f: FeatureDraft): HTMLSelectElement {
+    const select = el("select");
+    select.setAttribute("data-feature-field", "entity");
+    const none = el("option", undefined, "None");
+    none.value = "";
+    select.append(none);
+    const kind = this.kinds()[f.kind];
+    const states = (this.hassObj && this.hassObj.states) || {};
+    const likely: HTMLOptionElement[] = [];
+    const other: HTMLOptionElement[] = [];
+    const ids = Object.keys(states).sort((p, q) => this.entityName(p).localeCompare(this.entityName(q)));
+    for (const id of ids) {
+      const domain = id.split(".")[0]!;
+      const classes = kind ? kind.entity_domains[domain] : undefined;
+      if (classes === undefined) continue;
+      const dc = states[id]!.attributes.device_class;
+      const o = el("option", undefined, `${this.entityName(id)} (${id})`);
+      o.value = id;
+      o.selected = id === f.entity_id;
+      if (classes === null || (dc && classes.indexOf(dc) !== -1)) likely.push(o);
+      else other.push(o);
+    }
+    if (f.entity_id && !states[f.entity_id]) {
+      const o = el("option", undefined, `${f.entity_id} (not found)`);
+      o.value = f.entity_id;
+      o.selected = true;
+      likely.unshift(o);
+    }
+    for (const [label, options] of [
+      ["Suggested", likely],
+      ["Other", other],
+    ] as Array<[string, HTMLOptionElement[]]>) {
+      if (!options.length) continue;
+      const group = document.createElement("optgroup");
+      group.label = label;
+      for (const o of options) group.append(o);
+      select.append(group);
+    }
+    select.addEventListener("change", () => {
+      if (!this.featureDraft) return;
+      this.featureDraft = { ...this.featureDraft, entity_id: select.value || null };
+      this.featureDirty = true;
+      this.renderDraft();
+      this.updateFeatureReadouts();
+    });
+    return select;
+  }
+
+  private entityName(entityId: string): string {
+    const st = this.hassObj && this.hassObj.states ? this.hassObj.states[entityId] : undefined;
+    const name = st && st.attributes.friendly_name;
+    return typeof name === "string" && name ? name : entityId;
+  }
+
+  private entityFits(kind: string, entityId: string): boolean {
+    const k = this.kinds()[kind];
+    return !!k && k.entity_domains[entityId.split(".")[0]!] !== undefined;
+  }
+
+  /** Which areas it joins: worked out from the map, or chosen. */
+  private featureAreas(frame: FusedFrame, f: FeatureDraft, kind: FeatureKind | undefined): HTMLElement {
+    const wrap = el("div", "feature-areas");
+    const auto = el("label", "check");
+    const autoBox = el("input");
+    autoBox.type = "checkbox";
+    autoBox.checked = f.areas === null;
+    autoBox.setAttribute("data-feature-field", "areas-auto");
+    autoBox.addEventListener("change", () => {
+      if (!this.featureDraft) return;
+      this.featureDraft = {
+        ...this.featureDraft,
+        areas: autoBox.checked ? null : this.autoAreas(frame, this.featureDraft),
+      };
+      this.featureDirty = true;
+      this.render();
+    });
+    auto.append(autoBox, el("span", undefined, "Work out the areas it joins from the map"));
+    wrap.append(auto);
+    this.featureAreasNote = el("div", "hint small");
+    wrap.append(this.featureAreasNote);
+    if (f.areas !== null) {
+      const max = kind ? kind.max_areas : 2;
+      const list = el("div", "area-checks");
+      for (const a of frame.areas) {
+        const label = el("label", "check");
+        const box = el("input");
+        box.type = "checkbox";
+        box.checked = f.areas.indexOf(a.area_id) !== -1;
+        box.disabled = !box.checked && f.areas.length >= max;
+        box.setAttribute("data-feature-area", a.area_id);
+        box.addEventListener("change", () => {
+          if (!this.featureDraft || this.featureDraft.areas === null) return;
+          const chosen = this.featureDraft.areas.filter((x) => x !== a.area_id);
+          if (box.checked) chosen.push(a.area_id);
+          this.featureDraft = { ...this.featureDraft, areas: chosen };
+          this.featureDirty = true;
+          this.render();
+        });
+        label.append(box, el("span", undefined, a.name));
+        list.append(label);
+      }
+      wrap.append(list);
+    }
+    return wrap;
+  }
+
+  private autoAreas(frame: FusedFrame | null, f: FeatureDraft): string[] {
+    if (!frame) return [];
+    const kind = this.kinds()[f.kind];
+    return segmentSides(f.points[0], f.points[1], frame.areas, kind ? kind.max_areas : 2);
+  }
+
+  private areaNames(ids: string[]): string {
+    const frame = this.frame();
+    const names = ids.map((id) => {
+      const a = frame ? frame.areas.find((x) => x.area_id === id) : undefined;
+      return a ? a.name : id;
+    });
+    return names.length ? names.join(" and ") : "nothing (outside, or not on a wall yet)";
+  }
+
+  private updateFeatureReadouts(): void {
+    const f = this.featureDraft;
+    if (!f) return;
+    if (this.featureLength) this.featureLength.textContent = `${fmt(segmentLength(f.points[0], f.points[1]))} m long`;
+    if (this.featureAreasNote) {
+      this.featureAreasNote.textContent =
+        f.areas === null ? `Joins ${this.areaNames(this.autoAreas(this.frame(), f))}.` : "Pick the areas it joins:";
+    }
+    if (this.featureSave) this.featureSave.disabled = !this.canSaveFeature();
+  }
+
+  private canSaveFeature(): boolean {
+    const f = this.featureDraft;
+    return !!f && this.featureDirty && !this.busy && segmentLength(f.points[0], f.points[1]) >= 0.05;
+  }
+
+  /** Push the draft's ends into the fields (not the one being typed in). */
+  private syncFeatureInputs(except?: number): void {
+    const f = this.featureDraft;
+    if (!f) return;
+    this.featureInputs.forEach((input, i) => {
+      if (i !== except) input.value = fmt(f.points[i >> 1]![i & 1]!);
+    });
+    this.updateFeatureReadouts();
+  }
+
+  // -- Features: actions ------------------------------------------------------
+
+  private featureToDraft(f: FusedFeature): FeatureDraft {
+    return {
+      feature_id: f.feature_id,
+      kind: f.kind,
+      points: [
+        [f.points[0]![0], f.points[0]![1]],
+        [f.points[1]![0], f.points[1]![1]],
+      ],
+      name: f.name || "",
+      entity_id: f.entity_id,
+      areas: f.areas_auto ? null : f.areas.slice(),
+    };
+  }
+
+  private clearFeature(): void {
+    this.awaitingFeature = null;
+    this.selectedFeature = null;
+    this.featureDraft = null;
+    this.featureDirty = false;
+  }
+
+  selectFeature(featureId: string): void {
+    if (featureId === this.selectedFeature) return;
+    if (!this.confirmDiscard()) return;
+    this.selected = null;
+    this.resetEdit();
+    this.clearFeature();
+    this.selectedFeature = featureId;
+    this.render();
+  }
+
+  /** A new one-metre line in the middle of what's on screen. */
+  private addFeature(kind: string): void {
+    if (!this.confirmDiscard()) return;
+    this.selected = null;
+    this.resetEdit();
+    this.clearFeature();
+    const v = this.view;
+    const cx = snap(v.x + v.width / 2, 0.05);
+    const cy = snap(v.y + v.height / 2, 0.05);
+    this.selectedFeature = NEW_FEATURE;
+    this.featureDraft = { feature_id: null, kind, points: [[cx - 0.5, cy], [cx + 0.5, cy]], name: "", entity_id: null, areas: null };
+    this.featureDirty = true;
+    this.render();
+  }
+
+  private featureChanged(): void {
+    this.featureDirty = true;
+    this.status = "";
+    this.renderDraft();
+    this.updateFeatureReadouts();
+  }
+
+  private onFeaturePoint(end: number, axis: number, raw: string): void {
+    const f = this.featureDraft;
+    const value = Number(raw);
+    if (!f || raw === "" || !isFinite(value)) return;
+    const points: [Pair, Pair] = [[f.points[0][0], f.points[0][1]], [f.points[1][0], f.points[1][1]]];
+    points[end]![axis] = value;
+    this.featureDraft = { ...f, points };
+    this.featureChanged();
+    this.syncFeatureInputs(end * 2 + axis);
+  }
+
+  private cancelFeature(): void {
+    if (this.featureDraft && this.featureDraft.feature_id) {
+      this.featureDirty = false; // back to the saved one
+      this.featureDraft = null;
+    } else {
+      this.clearFeature();
+    }
+    this.status = "";
+    this.render();
+  }
+
+  private async saveFeature(): Promise<void> {
+    const hass = this.hassObj;
+    const frame = this.frame();
+    const f = this.featureDraft;
+    if (!hass || !frame || !f || !this.canSaveFeature()) return;
+    const message: Record<string, unknown> = {
+      type: "map_fusion/feature/set",
+      kind: f.kind,
+      points: [
+        [snap(f.points[0][0], 0.001), snap(f.points[0][1], 0.001)],
+        [snap(f.points[1][0], 0.001), snap(f.points[1][1], 0.001)],
+      ],
+      name: f.name.trim() || null,
+      entity_id: f.entity_id,
+      areas: f.areas,
+    };
+    if (f.feature_id) message.feature_id = f.feature_id;
+    else message.frame_id = frame.frame_id;
+    this.busy = true;
+    this.status = "Saving…";
+    this.render();
+    try {
+      const saved = await hass.callWS<FusedFeature>(message);
+      this.selectedFeature = saved && saved.feature_id ? saved.feature_id : this.selectedFeature;
+      this.awaitingFeature = this.selectedFeature;
+      this.featureDraft = saved && saved.feature_id ? this.featureToDraft(saved) : this.featureDraft;
+      this.featureDirty = false;
+      this.status = "Saved.";
+    } catch (err) {
+      const e = err as { message?: string };
+      this.status = `Couldn't save: ${(e && e.message) || String(err)}`;
+    }
+    this.busy = false;
+    this.render();
+  }
+
+  private async deleteFeature(): Promise<void> {
+    const hass = this.hassObj;
+    const f = this.featureDraft;
+    if (!hass || !f || !f.feature_id) return;
+    this.busy = true;
+    this.render();
+    try {
+      await hass.callWS({ type: "map_fusion/feature/remove", feature_id: f.feature_id });
+      this.clearFeature();
+      this.status = "";
+    } catch (err) {
+      const e = err as { message?: string };
+      this.status = `Couldn't delete: ${(e && e.message) || String(err)}`;
+    }
+    this.busy = false;
+    this.render();
+  }
+
+  /** Where an end lands: on the nearest room edge if close enough, else on the grid. */
+  private placeEnd(p: Pair): Pair {
+    const frame = this.frame();
+    if (this.wallSnap && frame) {
+      const rings: Pair[][] = [];
+      for (const a of frame.areas) for (const r of a.polygons) rings.push(r);
+      const onWall = nearestOnRings(p, rings, this.unitsPerPx() * WALL_SNAP_PX);
+      if (onWall) return [snap(onWall[0], 0.001), snap(onWall[1], 0.001)];
+    }
+    return [snap(p[0], this.step), snap(p[1], this.step)];
+  }
+
+  private moveFeature(next: [Pair, Pair]): void {
+    if (!this.featureDraft) return;
+    this.featureDraft = { ...this.featureDraft, points: next };
+    this.featureDirty = true;
+    this.status = "";
+    this.renderDraft();
+    this.syncFeatureInputs();
   }
 
   private editor(entry: Entry): HTMLElement {
@@ -842,6 +1409,7 @@ export class MapFusionPanel extends HTMLElement {
     this.frameId = frameId;
     this.selected = null;
     this.resetEdit();
+    this.clearFeature();
     this.render();
   }
 
@@ -850,11 +1418,12 @@ export class MapFusionPanel extends HTMLElement {
     if (!this.confirmDiscard()) return;
     this.selected = areaId;
     this.resetEdit();
+    this.clearFeature();
     this.render();
   }
 
   private confirmDiscard(): boolean {
-    if (!this.dirty) return true;
+    if (!this.dirty && !this.featureDirty) return true;
     return typeof window.confirm !== "function" || window.confirm("Discard the unsaved changes?");
   }
 
@@ -1016,6 +1585,36 @@ export class MapFusionPanel extends HTMLElement {
     const d = this.draft;
     const attr = (name: string) => (target ? target.getAttribute(name) : null);
 
+    const f = this.featureDraft;
+    if (f) {
+      const end = attr("data-end");
+      if (end !== null || attr("data-feature-body") !== null) {
+        e.preventDefault();
+        this.featureDrag = {
+          end: end !== null ? Number(end) : -1,
+          start: [[f.points[0][0], f.points[0][1]], [f.points[1][0], f.points[1][1]]],
+          from: this.toMap(e),
+          pointerId: e.pointerId,
+        };
+        try {
+          this.svg.setPointerCapture(e.pointerId);
+        } catch {
+          // Not supported (tests, old browsers).
+        }
+        try {
+          this.svg.focus();
+        } catch {
+          // Old browsers can't focus SVG.
+        }
+        return;
+      }
+    }
+    const featureId = attr("data-feature");
+    if (featureId) {
+      this.selectFeature(featureId);
+      return;
+    }
+
     if (d && d.kind === "polygon") {
       const vertexAttr = attr("data-vertex");
       if (vertexAttr !== null) {
@@ -1068,6 +1667,24 @@ export class MapFusionPanel extends HTMLElement {
   }
 
   private onPointerMove(e: PointerEvent): void {
+    const fd = this.featureDrag;
+    if (fd && e.pointerId === fd.pointerId) {
+      const [x, y] = this.toMap(e);
+      const dx = x - fd.from[0];
+      const dy = y - fd.from[1];
+      const [a, b] = fd.start;
+      if (fd.end === -1) {
+        // Move the whole line: its first end lands on the grid (or a wall), the other follows.
+        const first = this.placeEnd([a[0] + dx, a[1] + dy]);
+        const ox = first[0] - a[0];
+        const oy = first[1] - a[1];
+        this.moveFeature([first, [b[0] + ox, b[1] + oy]]);
+      } else {
+        const moved = this.placeEnd([fd.start[fd.end]![0] + dx, fd.start[fd.end]![1] + dy]);
+        this.moveFeature(fd.end === 0 ? [moved, b] : [a, moved]);
+      }
+      return;
+    }
     const drag = this.drag;
     if (!drag || e.pointerId !== drag.pointerId) return;
     const [x, y] = this.toMap(e);
@@ -1087,6 +1704,17 @@ export class MapFusionPanel extends HTMLElement {
   }
 
   private onPointerUp(e: PointerEvent): void {
+    const fd = this.featureDrag;
+    if (fd && e.pointerId === fd.pointerId) {
+      this.featureDrag = null;
+      try {
+        this.svg.releasePointerCapture(e.pointerId);
+      } catch {
+        // see onPointerDown
+      }
+      this.render();
+      return;
+    }
     const drag = this.drag;
     if (!drag || e.pointerId !== drag.pointerId) return;
     this.drag = null;
@@ -1100,6 +1728,20 @@ export class MapFusionPanel extends HTMLElement {
   }
 
   private onKey(e: KeyboardEvent): void {
+    const f = this.featureDraft;
+    if (f) {
+      const arrows: Record<string, Pair> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+      const m = arrows[e.key];
+      if (!m) return;
+      e.preventDefault();
+      const dx = m[0] * this.step;
+      const dy = m[1] * this.step;
+      this.moveFeature([
+        [snap(f.points[0][0] + dx, 0.001), snap(f.points[0][1] + dy, 0.001)],
+        [snap(f.points[1][0] + dx, 0.001), snap(f.points[1][1] + dy, 0.001)],
+      ]);
+      return;
+    }
     const d = this.draft;
     if (!d) return;
     if (d.kind === "polygon" && this.vertex !== null) {

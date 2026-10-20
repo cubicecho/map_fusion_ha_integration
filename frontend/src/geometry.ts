@@ -471,3 +471,100 @@ export function ringsOverlap(a: Pair[], b: Pair[]): boolean {
   const cb = ringCentroid(b);
   return (strictlyInside(ca, a) && strictlyInside(ca, b)) || (strictlyInside(cb, b) && strictlyInside(cb, a));
 }
+
+// -- Features (doors, windows, …): line segments ---------------------------------
+
+/** The closest point to `p` on the segment a–b. */
+export function nearestOnSegment(p: Pair, a: Pair, b: Pair): Pair {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const len2 = dx * dx + dy * dy;
+  const t = len2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2)) : 0;
+  return [a[0] + t * dx, a[1] + t * dy];
+}
+
+function dist(a: Pair, b: Pair): number {
+  return Math.sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]));
+}
+
+/** The closest point on any ring's edge within `maxDist`, or null (for snapping to walls). */
+export function nearestOnRings(p: Pair, rings: Pair[][], maxDist: number): Pair | null {
+  let best: Pair | null = null;
+  let bestD = maxDist;
+  for (const ring of rings) {
+    for (let i = 0; i < ring.length; i++) {
+      const q = nearestOnSegment(p, ring[i]!, ring[(i + 1) % ring.length]!);
+      const d = dist(p, q);
+      if (d <= bestD) {
+        best = q;
+        bestD = d;
+      }
+    }
+  }
+  return best;
+}
+
+export function segmentLength(a: Pair, b: Pair): number {
+  return dist(a, b);
+}
+
+const SIDE_PROBES_M = [0.15, 0.3, 0.5];
+const NEAR_M = 0.1;
+
+function areaAt(p: Pair, areas: Array<{ area_id: string; polygons: Pair[][] }>): string | null {
+  for (const a of areas) if (a.polygons.some((r) => pointInRing(p[0], p[1], r))) return a.area_id;
+  let best: string | null = null;
+  let bestD = NEAR_M;
+  for (const a of areas) {
+    for (const r of a.polygons) {
+      const q = nearestOnRings(p, [r], bestD);
+      if (q) {
+        bestD = dist(p, q);
+        best = a.area_id;
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * The areas either side of the line a–b, left side first: the same rule as
+ * the server (features.sides), so the panel can preview it before saving.
+ */
+export function segmentSides(
+  a: Pair,
+  b: Pair,
+  areas: Array<{ area_id: string; polygons: Pair[][] }>,
+  maxAreas = 2,
+): string[] {
+  const mx = (a[0] + b[0]) / 2;
+  const my = (a[1] + b[1]) / 2;
+  const len = dist(a, b) || 1;
+  const nx = -(b[1] - a[1]) / len;
+  const ny = (b[0] - a[0]) / len;
+  const found: string[] = [];
+  for (const sign of [1, -1]) {
+    for (const d of SIDE_PROBES_M) {
+      const hit = areaAt([mx + sign * nx * d, my + sign * ny * d], areas);
+      if (hit !== null) {
+        if (found.indexOf(hit) === -1) found.push(hit);
+        break;
+      }
+    }
+  }
+  return found.slice(0, maxAreas);
+}
+
+export type OpenState = "open" | "closed" | "unknown";
+
+/** Is a linked door/window open? Same rule as the server (features.open_state). */
+export function openState(entityId: string | null, state: string | undefined): OpenState {
+  if (!entityId || state === undefined) return "unknown";
+  const domain = entityId.split(".")[0];
+  if (domain === "binary_sensor") return state === "on" ? "open" : state === "off" ? "closed" : "unknown";
+  if (domain === "cover") {
+    if (state === "open" || state === "opening" || state === "closing") return "open";
+    return state === "closed" ? "closed" : "unknown";
+  }
+  return "unknown";
+}
