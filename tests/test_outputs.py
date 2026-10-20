@@ -124,3 +124,38 @@ async def test_fill_setting_rereads_and_is_stored(
     kitchen = manager.fused.frames[0].areas[0]
     assert kitchen.filled_polygons == kitchen.polygons  # filling off: same as traced
     assert hass_storage[DOMAIN]["data"]["settings"] == {"fill_max_m": 0}
+
+
+# Sidebar page -----------------------------------------------------------------------
+
+
+async def test_panel_is_registered_when_the_frontend_is_loaded(
+    hass: HomeAssistant, hass_client, areas: dict[str, str], image_mock: Any
+) -> None:
+    from unittest.mock import AsyncMock, patch
+
+    from homeassistant.setup import async_setup_component
+
+    from custom_components.map_fusion import panel
+
+    assert await async_setup_component(hass, "http", {})
+    client = await hass_client()
+    hass.config.components.add("frontend")
+    with (
+        patch("custom_components.map_fusion.panel.panel_custom.async_register_panel", new=AsyncMock()) as register,
+        patch("custom_components.map_fusion.panel.frontend.async_remove_panel") as remove,
+    ):
+        await panel.async_register(hass)
+        await panel.async_register(hass)  # a reload: static path isn't registered twice
+        kwargs = register.await_args.kwargs
+        assert kwargs["frontend_url_path"] == "map-fusion"
+        assert kwargs["webcomponent_name"] == "map-fusion-panel"
+        assert kwargs["require_admin"] is True
+        assert kwargs["module_url"].startswith("/map_fusion_static/map-fusion-panel.js?v=")
+        panel.async_unregister(hass)
+        remove.assert_called_once()
+
+    # The bundle is served from the integration folder.
+    resp = await client.get("/map_fusion_static/map-fusion-panel.js")
+    assert resp.status == 200
+    assert (await resp.text()).startswith("/*! map-fusion-panel v")

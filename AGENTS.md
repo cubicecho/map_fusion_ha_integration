@@ -6,6 +6,8 @@ A Home Assistant custom integration that reads the maps from robot vacuums (Drea
 
 ## Commands
 
+Panel (frontend): `cd frontend && npm install && npm run build && npm test`. Rebuild and commit the bundle with every `frontend/src` change; CI checks it's up to date. ES2015 target, no runtime dependencies (same rules as presence-map-card).
+
 ```bash
 # Install test dependencies. Don't use an editable install (-e): HA's
 # custom-component loader can't read the editable path hook. Pytest puts the
@@ -41,6 +43,11 @@ custom_components/map_fusion/
   render.py          # frame → SVG + calibration points (pure)
   image.py           # image platform: SVG image entities per frame (traced + filled)
   preview.py         # signed-URL SVG previews for the options flow (place an area)
+  panel.py           # registers the sidebar page (/map-fusion, admin) and serves frontend/
+  frontend/          # built panel bundle (committed; source in /frontend)
+frontend/            # the sidebar page: vanilla TS web component, esbuild → custom_components/map_fusion/frontend/
+  src/panel.ts       # <map-fusion-panel>: map, drag/resize, fields, save/remove over websocket
+  src/geometry.ts    # pure editing maths (drag, snap, view, hit tests)
   align.py           # line a second vacuum's map up with the anchor (rigid fit on shared areas, pure)
   sources/
     __init__.py      # ADAPTERS: kind → adapter module

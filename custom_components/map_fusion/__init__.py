@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
-from . import preview, services, websocket
+from . import panel, preview, services, websocket
 from .const import DOMAIN
 from .coordinator import MapFusionManager
 
@@ -34,6 +34,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: MapFusionConfigEntry) ->
     entry.runtime_data = manager
     await manager.async_start()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    await panel.async_register(hass)
     return True
 
 
@@ -41,5 +42,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: MapFusionConfigEntry) -
     """Unload a config entry."""
     if not await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         return False
+    panel.async_unregister(hass)
     await entry.runtime_data.async_stop()
     return True

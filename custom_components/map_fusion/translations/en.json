@@ -29,7 +29,7 @@
       },
       "place_area": {
         "title": "Place an area",
-        "description": "Pick the area to place. Use this for areas no vacuum room covers, or to replace a vacuum room's shape.\n\n{map}\n\n*{frame}. Grid lines are 1 m apart.*",
+        "description": "Pick the area to place. Use this for areas no vacuum room covers, or to replace a vacuum room's shape.\n\n**Easier:** the [Map Fusion page](/map-fusion) in the sidebar lets you drag and resize areas on the map.\n\n{map}\n\n*{frame}. Grid lines are 1 m apart.*",
         "data": {
           "area_id": "Area",
           "frame_id": "Map"

@@ -37,6 +37,30 @@ jobs:
       - name: Run tests
         run: pytest --tb=short
 
+  frontend:
+    name: Panel (frontend)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Type check
+        run: npm run typecheck
+      - name: Build the panel bundle
+        run: npm run build
+      - name: Run tests
+        run: npm test
+      # The bundle ships inside custom_components/, so it must match the source.
+      - name: Verify the committed bundle is up to date
+        run: git diff --exit-code -- ../custom_components/map_fusion/frontend
+
   hassfest:
     name: Hassfest
     runs-on: ubuntu-latest
@@ -57,7 +81,7 @@ jobs:
 
   release:
     name: Release
-    needs: [test, hassfest, hacs]
+    needs: [test, frontend, hassfest, hacs]
     runs-on: ubuntu-latest
     # Only release on direct pushes to main, not on PRs.
     if: github.event_name == 'push'
