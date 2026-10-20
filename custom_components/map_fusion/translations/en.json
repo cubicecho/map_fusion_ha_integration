@@ -119,6 +119,72 @@
           "description": "Frame id. Optional when the area is placed in only one map."
         }
       }
+    },
+    "get_map": {
+      "name": "Get map",
+      "description": "Return the fused map document (all frames, or one).",
+      "fields": {
+        "frame_id": {
+          "name": "Map",
+          "description": "Frame id from map_fusion/get. Optional when there is only one map."
+        }
+      }
+    },
+    "transform_point": {
+      "name": "Transform point",
+      "description": "Convert a point between map metres and a vacuum's own coordinates (Dreame: mm, y up). Use it to send a vacuum to a spot picked on the map.",
+      "fields": {
+        "frame_id": {
+          "name": "Map",
+          "description": "Frame id from map_fusion/get. Optional when there is only one map."
+        },
+        "source_id": {
+          "name": "Vacuum",
+          "description": "Vacuum whose coordinates to use. Optional when the map has one vacuum."
+        },
+        "x": {
+          "name": "x",
+          "description": "x of the point (metres on the map, or vacuum units when converting to the map)."
+        },
+        "y": {
+          "name": "y",
+          "description": "y of the point."
+        },
+        "to": {
+          "name": "Convert to",
+          "description": "source: map metres → vacuum coordinates. frame: vacuum coordinates → map metres."
+        }
+      }
+    },
+    "locate_point": {
+      "name": "Locate point",
+      "description": "Find which area a point is in. Every card and automation gets the same answer.",
+      "fields": {
+        "frame_id": {
+          "name": "Map",
+          "description": "Frame id from map_fusion/get. Optional when there is only one map."
+        },
+        "source_id": {
+          "name": "Vacuum",
+          "description": "If set, x and y are in this vacuum's own coordinates (e.g. the robot's position)."
+        },
+        "x": {
+          "name": "x",
+          "description": "x in map metres (or vacuum units with Vacuum set)."
+        },
+        "y": {
+          "name": "y",
+          "description": "y in map metres (or vacuum units with Vacuum set)."
+        }
+      }
+    }
+  },
+  "selector": {
+    "transform_to": {
+      "options": {
+        "source": "Map → vacuum",
+        "frame": "Vacuum → map"
+      }
     }
   }
 }

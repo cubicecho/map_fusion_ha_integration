@@ -1,6 +1,6 @@
 # Fused map document (v1)
 
-Live: the document, `map_fusion/get`, `map_fusion/subscribe`, the write APIs and the `set_area`/`clear_area` services (phase 2). Not yet: `get_map`, `transform_point`, `locate_point`, the image entity (phase 4).
+Everything here is live (phases 1, 2 and 4).
 
 What cards and integrations get from Map Fusion. Everything here is a proposal. Change it freely until v1 ships, then bump `SCHEMA_VERSION` (`const.py`) on breaking changes.
 
@@ -90,12 +90,16 @@ Why include `transform` per source: cards can turn a click on the fused map into
 |---|---|---|
 | WS `map_fusion/get` | Cards: one-off fetch | Optional `frame_id` filter |
 | WS `map_fusion/subscribe` | Cards: push on change | Sends the full doc, then a new one on each rebuild |
-| Service `map_fusion.get_map` (`SupportsResponse.ONLY`) | Automations, scripts, other integrations | Same document |
-| Service `map_fusion.transform_point` | Floor metres ↔ source native coords | For go-to / zone actions on a vacuum |
-| Service `map_fusion.locate_point` | Floor metres → `area_id` | Point-in-polygon (with a ~10 cm tolerance for wall gaps), so every consumer agrees on "which room" |
-| `image.map_fusion_<floor>` entity | Plain picture cards, Xiaomi vacuum map card | One per frame. Rendered PNG/SVG, `calibration_points` attribute in that card's format |
+| Service `map_fusion.get_map` | Automations, scripts, other integrations | Same document. Optional `frame_id` |
+| Service `map_fusion.transform_point` | Frame metres ↔ a vacuum's native coords | `x`, `y`, `to: source` (default) or `frame`, optional `frame_id`, `source_id`. Returns `{frame_id, source_id, x, y}`. For go-to / zone actions on a vacuum |
+| Service `map_fusion.locate_point` | Point → `area_id` | `x`, `y` in frame metres, or in a vacuum's native coords with `source_id` (e.g. the robot's position). Returns `{frame_id, x, y, area_id, name, inside, distance_m}` |
+| `image.map_fusion_<frame name>` entity | Picture cards, Xiaomi Vacuum Map Card | One per frame, SVG (no extra dependencies). Updated when the frame changes |
 
-Entity attributes carry only small things (floor id, area count, version), never geometry.
+All three services are response-only (`SupportsResponse.ONLY`). Without `frame_id` they use the only frame, or the frame holding `source_id`; otherwise they fail with "give a frame_id".
+
+`locate_point` rule: inside an outline wins; where shapes overlap (boxes, manual shapes) the smallest area wins; otherwise the nearest area within 10 cm (vacuum outlines stop short of walls and doors); else `area_id: null`.
+
+Image entity attributes (small, never geometry): `frame_id`, `floor_id`, `area_count`, `schema_version`, `width`, `height` (px), `map_to_image` (frame metres → image px, `[a, b, c, d, tx, ty]`), and `calibration_points` (three `{vacuum: {x, y}, map: {x, y}}` pairs for the anchor vacuum, Xiaomi Vacuum Map Card format; `null` for frames with no vacuum). The image is 50 px per metre with 0.3 m of padding. A frame whose id changes (it moved to a floor) gets a new entity; the old one goes unavailable.
 
 ## Write APIs (user placements)
 

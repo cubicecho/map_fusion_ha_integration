@@ -201,7 +201,11 @@ These changes live in the presence-map-card repo. This repo only provides the AP
    - Card boxes are used only for areas Map Fusion hasn't placed, and only when the user gave x/y/width/height. Otherwise the card lists them as "Not on the map yet".
    - No separate migration button: "Place on Map Fusion map" per area does the same job, and the live preview shows the card box against the vacuum rooms so it can be lined up first. Vacuum shapes can't be replaced from the card editor (only manual ones updated).
    - The card refuses fused documents with a `version` it doesn't know (`SUPPORTED_VERSION` in `src/mapfusion.ts`).
-4. **More outputs.** `map_fusion.get_map`, `transform_point` and `locate_point` services, plus a per-frame `image` entity with `calibration_points`.
+4. **More outputs** ✅ (2026-10-20). Response-only services `get_map`, `transform_point`, `locate_point` (`queries.py`), and one SVG `image` entity per frame with `calibration_points` (`render.py`, `image.py`). 102 tests. Differences from the plan:
+   - SVG, not PNG: no Pillow dependency, and browsers show SVG in picture cards. Cards that need a raster image would need a PNG option later.
+   - `locate_point` also takes a vacuum's native coordinates (`source_id`), so "which room is the robot in" is one call.
+   - Image entities are keyed by frame id. A frame that moves to a floor gets a new entity, and the old one goes unavailable (remove it from the entity settings).
+   - Real D10 Plus check: the image matches the vacuum map, and the charger position (vacuum mm) lands inside the Office.
 5. **Second source + alignment.** Valetudo first (same parser), then the Xiaomi extractor (bbox only). Fit from shared-area centroids (2+ shared areas → similarity transform; 3+ → least squares with `residual_m`; try mirrored). Merge with `confidence`.
 6. **Extras.** Walls/doors layer in the output, polygon point editing, a repair issue when a source's rooms change.
 

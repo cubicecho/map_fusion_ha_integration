@@ -58,3 +58,75 @@ clear_area:
       example: "vacuum.d10_plus:46"
       selector:
         text:
+get_map:
+  fields:
+    frame_id:
+      example: "vacuum.d10_plus:46"
+      selector:
+        text:
+transform_point:
+  fields:
+    frame_id:
+      example: "vacuum.d10_plus:46"
+      selector:
+        text:
+    source_id:
+      example: vacuum.d10_plus
+      selector:
+        entity:
+          domain: vacuum
+    x:
+      required: true
+      example: 2.5
+      selector:
+        number:
+          min: -100000
+          max: 100000
+          step: any
+          mode: box
+    y:
+      required: true
+      example: 1.5
+      selector:
+        number:
+          min: -100000
+          max: 100000
+          step: any
+          mode: box
+    to:
+      default: source
+      selector:
+        select:
+          translation_key: transform_to
+          options:
+            - source
+            - frame
+locate_point:
+  fields:
+    frame_id:
+      example: "vacuum.d10_plus:46"
+      selector:
+        text:
+    source_id:
+      example: vacuum.d10_plus
+      selector:
+        entity:
+          domain: vacuum
+    x:
+      required: true
+      example: 2.5
+      selector:
+        number:
+          min: -100000
+          max: 100000
+          step: any
+          mode: box
+    y:
+      required: true
+      example: 1.5
+      selector:
+        number:
+          min: -100000
+          max: 100000
+          step: any
+          mode: box

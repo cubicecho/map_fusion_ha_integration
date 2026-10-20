@@ -14,6 +14,7 @@ from . import placements as pl
 from .const import DOMAIN
 from .coordinator import PlacementError, get_manager
 from .model import FusedMap
+from .queries import document
 
 try:  # HA 2026.10+ validates websocket messages with probatio
     import probatio as vol
@@ -29,15 +30,6 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_area_clear)
 
 
-def _document(fused: FusedMap | None, frame_id: str | None) -> dict[str, Any] | None:
-    if fused is None:
-        return None
-    doc = fused.as_dict()
-    if frame_id is not None:
-        doc["frames"] = [f for f in doc["frames"] if f["frame_id"] == frame_id]
-    return doc
-
-
 @websocket_api.websocket_command(
     {vol.Required("type"): f"{DOMAIN}/get", vol.Optional("frame_id"): str}
 )
@@ -50,7 +42,7 @@ def ws_get(
     if manager is None:
         connection.send_error(msg["id"], "not_loaded", "Map Fusion is not set up")
         return
-    connection.send_result(msg["id"], _document(manager.fused, msg.get("frame_id")))
+    connection.send_result(msg["id"], document(manager.fused, msg.get("frame_id")))
 
 
 @websocket_api.websocket_command(
@@ -70,7 +62,7 @@ def ws_subscribe(
     @callback
     def forward(fused: FusedMap) -> None:
         connection.send_message(
-            websocket_api.event_message(msg["id"], _document(fused, frame_id))
+            websocket_api.event_message(msg["id"], document(fused, frame_id))
         )
 
     connection.subscriptions[msg["id"]] = manager.async_subscribe(forward)

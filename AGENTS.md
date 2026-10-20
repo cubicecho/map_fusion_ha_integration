@@ -2,7 +2,7 @@
 
 A Home Assistant custom integration that reads the maps from robot vacuums (Dreame, Xiaomi/Roborock, Valetudo, …), puts them in one shared frame per HA floor (or per vacuum map when areas have no floor), and ties each room to an HA area. Other cards and integrations read the result, a **fused map**, instead of each one parsing vacuum maps itself.
 
-**Status: phase 2 done** (Dreame room polygons over websocket, plus user-placed areas through websocket, services and the options flow). Phase 3 (presence-map-card reads Map Fusion) is done in that repo. Next: phase 4, more outputs (`get_map`, `transform_point`, `locate_point`, image entity). See [`.agents/plan.md`](.agents/plan.md).
+**Status: phase 4 done.** Dreame room polygons over websocket; user-placed areas (websocket, services, options flow); presence-map-card reads Map Fusion (phase 3, in that repo); read services `get_map`, `transform_point`, `locate_point` and a per-frame SVG image entity. Next: phase 5, a second source and alignment. See [`.agents/plan.md`](.agents/plan.md).
 
 ## Commands
 
@@ -36,7 +36,10 @@ custom_components/map_fusion/
   merge.py           # sources + area links + origins + placements → FusedMap (pure)
   coordinator.py     # MapFusionManager: discovery, events, re-read rules, store, subscribers, repairs, placement API
   websocket.py       # map_fusion/get, /subscribe; admin: /area/set, /area/clear
-  services.py        # map_fusion.set_area, map_fusion.clear_area (services.yaml)
+  services.py        # set_area, clear_area; response-only get_map, transform_point, locate_point (services.yaml)
+  queries.py         # find frame, locate point, frame ↔ vacuum transforms, document (pure)
+  render.py          # frame → SVG + calibration points (pure)
+  image.py           # image platform: one SVG image entity per frame
   sources/
     valetudo_map.py  # ValetudoMap PNG/JSON → room polygons (pure; Valetudo will reuse it)
     dreame.py        # Tasshack dreame-vacuum: entity discovery, pixel rooms, bbox fallback
