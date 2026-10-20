@@ -108,6 +108,10 @@ class SourceRoom:
     label_point: Point
     area_m2: float
     geometry: Geometry
+    # The room with furniture gaps filled (see geometry.fill_gaps). None when
+    # the source can't do better than `polygons` (boxes).
+    filled: list[Ring] | None = None
+    filled_m2: float | None = None
 
 
 @dataclass(slots=True)
@@ -144,6 +148,9 @@ class FusedArea:
     # How well two or more vacuums agree on this area's shape (0..1, IoU).
     # None when only one vacuum sees it.
     confidence: float | None = None
+    # The shape with furniture gaps filled. Same bounding box as `rect`.
+    filled_polygons: list[Ring] | None = None
+    filled_m2: float | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -157,6 +164,8 @@ class FusedArea:
             "geometry": self.geometry,
             "sources": self.sources,
             "confidence": None if self.confidence is None else _r(self.confidence, 2),
+            "filled_polygons": [_ring(r) for r in (self.filled_polygons or self.polygons)],
+            "filled_m2": _r(self.area_m2 if self.filled_m2 is None else self.filled_m2, 2),
         }
 
 

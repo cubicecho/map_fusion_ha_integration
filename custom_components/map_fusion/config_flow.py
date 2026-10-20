@@ -85,7 +85,7 @@ class MapFusionOptionsFlow(OptionsFlow):
         if self._manager is None:
             return self.async_abort(reason="not_loaded")
         return self.async_show_menu(
-            step_id="init", menu_options=["place_area", "clear_area", "map_floor"]
+            step_id="init", menu_options=["place_area", "clear_area", "map_floor", "filled_shapes"]
         )
 
     # Place an area ----------------------------------------------------------
@@ -231,3 +231,24 @@ class MapFusionOptionsFlow(OptionsFlow):
                 }
             ),
         )
+
+    # Filled shapes -----------------------------------------------------------
+
+    async def async_step_filled_shapes(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        manager = self._manager
+        assert manager is not None
+        if user_input is not None:
+            await manager.async_set_fill_max(user_input["fill_max_m"])
+            return self.async_create_entry(data={})
+        schema = vol.Schema(
+            {
+                vol.Required("fill_max_m", default=manager.fill_max_m): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=5, step=0.1, unit_of_measurement="m", mode=selector.NumberSelectorMode.BOX
+                    )
+                )
+            }
+        )
+        return self.async_show_form(step_id="filled_shapes", data_schema=schema)

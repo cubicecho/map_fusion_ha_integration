@@ -28,7 +28,7 @@ class RenderedFrame:
     calibration_points: list[dict[str, dict[str, float]]] | None
 
 
-def render(frame: FusedFrame) -> RenderedFrame:
+def render(frame: FusedFrame, *, filled: bool = False) -> RenderedFrame:
     bounds = frame.bounds or Rect(0, 0, 1, 1)
     to_image = Transform(
         a=PX_PER_M,
@@ -53,13 +53,15 @@ def render(frame: FusedFrame) -> RenderedFrame:
     )
     parts = [svg_open, f"<title>{escape(frame.name)}</title>", f"<style>{style}</style>"]
     for room in frame.unmapped_rooms:
-        rings = [[(p[0], p[1]) for p in ring] for ring in room["polygons"]]
+        key = "filled_polygons" if filled else "polygons"
+        rings = [[(p[0], p[1]) for p in ring] for ring in room.get(key) or room["polygons"]]
         parts.append(f'<path class="unlinked" d="{_path(rings, to_image)}"/>')
     for i, area in enumerate(frame.areas):
         cls = "room manual" if area.origin == "manual" else "room"
         fill = FILLS[i % len(FILLS)]
+        shape = (area.filled_polygons or area.polygons) if filled else area.polygons
         parts.append(
-            f'<path class="{cls}" fill="{fill}" d="{_path(area.polygons, to_image)}">'
+            f'<path class="{cls}" fill="{fill}" d="{_path(shape, to_image)}">'
             f"<title>{escape(area.name)}</title></path>"
         )
     for area in frame.areas:

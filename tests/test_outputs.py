@@ -85,3 +85,42 @@ async def test_moved_frame_gets_a_new_image(hass: HomeAssistant, ready: Any) -> 
     await hass.async_block_till_done()
     assert hass.states.get(IMAGE).state == STATE_UNAVAILABLE
     assert hass.states.get("image.map_fusion_ground") is not None
+
+
+# Filled shapes ---------------------------------------------------------------------
+
+
+async def test_filled_variant_everywhere(hass: HomeAssistant, hass_ws_client, ready: Any) -> None:
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id({"type": f"{DOMAIN}/get", "variant": "filled"})
+    doc = (await client.receive_json())["result"]
+    assert doc["variant"] == "filled"
+    area = doc["frames"][0]["areas"][0]
+    assert area["polygons"] == area["filled_polygons"]
+
+    await client.send_json_auto_id({"type": f"{DOMAIN}/get", "variant": "nope"})
+    assert not (await client.receive_json())["success"]
+
+    svc = await _call(hass, "get_map", variant="filled")
+    assert svc["variant"] == "filled"
+
+    filled_image = hass.states.get("image.map_fusion_map_1_filled")
+    assert filled_image is not None
+    assert filled_image.attributes["variant"] == "filled"
+    assert hass.states.get(IMAGE).attributes["variant"] == "traced"
+
+
+async def test_fill_setting_rereads_and_is_stored(
+    hass: HomeAssistant, ready: Any, image_mock: Any, hass_storage: dict[str, Any]
+) -> None:
+    manager = ready.runtime_data
+    reads = image_mock.await_count
+    result = await hass.config_entries.options.async_init(ready.entry_id)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "filled_shapes"})
+    assert result["step_id"] == "filled_shapes"
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"fill_max_m": 0})
+    assert manager.fill_max_m == 0
+    assert image_mock.await_count == reads + 1
+    kitchen = manager.fused.frames[0].areas[0]
+    assert kitchen.filled_polygons == kitchen.polygons  # filling off: same as traced
+    assert hass_storage[DOMAIN]["data"]["settings"] == {"fill_max_m": 0}

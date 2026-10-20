@@ -41,7 +41,10 @@ What cards and integrations get from Map Fusion. Everything here is a proposal. 
             { "source_id": "vacuum.downstairs", "map_id": "46", "segment_id": "1_2" }
           ],
           // 0..1: how well two or more vacuums agree on the shape (IoU). null with one vacuum.
-          "confidence": null
+          "confidence": null,
+          // The room with furniture gaps filled in (see "Filled shapes"). Same rect.
+          "filled_polygons": [[[0.0, 0.0], [4.2, 0.0], [4.2, 3.1], [0.0, 3.1]]],
+          "filled_m2": 13.0
         },
         {
           "area_id": "hallway",
@@ -88,6 +91,19 @@ What cards and integrations get from Map Fusion. Everything here is a proposal. 
 
 Why include `transform` per source: cards can turn a click on the fused map into vacuum coordinates (go-to, zone clean), and live data such as the robot's position can be drawn without Map Fusion re-sending the whole document.
 
+## Filled shapes
+
+Vacuums map the floor they can reach, so beds, wardrobes and kitchen islands leave holes and notches. Every area (and unmapped room) also carries `filled_polygons`: the same room with those gaps filled in, closer to its real walls.
+
+- Gaps along a row or column of the room, up to the size limit, are filled. So are pockets in the room's bounding box that touch its edge (furniture in a corner) and fit within the limit in both directions.
+- Never into another room's cells. Cells two rooms would both fill go to neither, so filled shapes don't overlap either (apart from a few cm of outline simplification).
+- Never past the room's bounding box, so `rect` (the sensor origin for presence-map-card) is the same in both variants.
+- Bigger gaps, such as a real L-shaped room's missing corner, are left.
+- The limit is set in the options (Configure → *Filled room shapes*), default 2 m. 0 turns filling off (filled = traced).
+- Box (`bbox`) and manual shapes are the same in both variants.
+
+`map_fusion/get`, `map_fusion/subscribe`, `map_fusion.get_map` and `map_fusion.locate_point` take `variant: "traced" | "filled"` (default `traced`). With `filled`, each area's `polygons` and `area_m2` are the filled ones, so consumers that only read `polygons` need no other change. The document says which it is in a top-level `variant` field.
+
 ## Read APIs
 
 | Channel | Use | Notes |
@@ -97,7 +113,7 @@ Why include `transform` per source: cards can turn a click on the fused map into
 | Service `map_fusion.get_map` | Automations, scripts, other integrations | Same document. Optional `frame_id` |
 | Service `map_fusion.transform_point` | Frame metres ↔ a vacuum's native coords | `x`, `y`, `to: source` (default) or `frame`, optional `frame_id`, `source_id`. Returns `{frame_id, source_id, x, y}`. For go-to / zone actions on a vacuum |
 | Service `map_fusion.locate_point` | Point → `area_id` | `x`, `y` in frame metres, or in a vacuum's native coords with `source_id` (e.g. the robot's position). Returns `{frame_id, x, y, area_id, name, inside, distance_m}` |
-| `image.map_fusion_<frame name>` entity | Picture cards, Xiaomi Vacuum Map Card | One per frame, SVG (no extra dependencies). Updated when the frame changes |
+| `image.map_fusion_<frame name>` and `image.map_fusion_<frame name>_filled` entities | Picture cards, Xiaomi Vacuum Map Card | Two per frame (traced and filled), SVG (no extra dependencies). Updated when the frame changes |
 
 All three services are response-only (`SupportsResponse.ONLY`). Without `frame_id` they use the only frame, or the frame holding `source_id`; otherwise they fail with "give a frame_id".
 

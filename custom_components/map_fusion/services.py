@@ -21,7 +21,16 @@ from . import placements as pl
 from .const import DOMAIN
 from .coordinator import MapFusionManager, get_manager
 from .model import FusedFrame, Ring
-from .queries import QueryError, document, find_frame, locate, to_frame, to_source
+from .queries import (
+    TRACED,
+    VARIANTS,
+    QueryError,
+    document,
+    find_frame,
+    locate,
+    to_frame,
+    to_source,
+)
 
 try:  # HA 2026.10+ validates with probatio
     import probatio as vol
@@ -47,7 +56,8 @@ SET_AREA_SCHEMA = vol.Schema(
 CLEAR_AREA_SCHEMA = vol.Schema(
     {vol.Required("area_id"): cv.string, vol.Optional("frame_id"): cv.string}
 )
-GET_MAP_SCHEMA = vol.Schema({vol.Optional("frame_id"): cv.string})
+VARIANT = {vol.Optional("variant", default=TRACED): vol.In(VARIANTS)}
+GET_MAP_SCHEMA = vol.Schema({vol.Optional("frame_id"): cv.string, **VARIANT})
 POINT_FIELDS = {
     vol.Optional("frame_id"): cv.string,
     vol.Optional("source_id"): cv.entity_id,
@@ -57,7 +67,7 @@ POINT_FIELDS = {
 TRANSFORM_POINT_SCHEMA = vol.Schema(
     {**POINT_FIELDS, vol.Optional("to", default="source"): vol.In(["source", "frame"])}
 )
-LOCATE_POINT_SCHEMA = vol.Schema(POINT_FIELDS)
+LOCATE_POINT_SCHEMA = vol.Schema({**POINT_FIELDS, **VARIANT})
 
 
 @callback
@@ -117,7 +127,11 @@ async def _get_map(call: ServiceCall) -> ServiceResponse:
     frame_id = call.data.get("frame_id")
     if frame_id is not None:
         _frame(call)  # error out on unknown frames
-    return document(manager.fused, frame_id) or {"version": None, "frames": [], "unplaced_areas": []}
+    return document(manager.fused, frame_id, call.data["variant"]) or {
+        "version": None,
+        "frames": [],
+        "unplaced_areas": [],
+    }
 
 
 async def _transform_point(call: ServiceCall) -> ServiceResponse:
@@ -145,5 +159,5 @@ async def _locate_point(call: ServiceCall) -> ServiceResponse:
         "frame_id": frame.frame_id,
         "x": round(point[0], 4),
         "y": round(point[1], 4),
-        **locate(frame, point),
+        **locate(frame, point, variant=call.data["variant"]),
     }

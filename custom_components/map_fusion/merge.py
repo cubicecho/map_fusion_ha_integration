@@ -251,6 +251,9 @@ def _build_frame(
                     "segment_id": room.segment_id,
                     "name": room.name,
                     "polygons": [_ring_dict(_shift(r, dx, dy)) for r in room.polygons],
+                    "filled_polygons": [
+                        _ring_dict(_shift(r, dx, dy)) for r in (room.filled or room.polygons)
+                    ],
                     "rect": room.rect.shifted(dx, dy).as_dict(),
                 }
             )
@@ -353,6 +356,8 @@ def _area(info: AreaInfo, rooms: list[SourceRoom], smap: SourceMap, dx: float, d
             {"source_id": smap.source_id, "map_id": smap.map_id, "segment_id": r.segment_id}
             for r in rooms
         ],
+        filled_polygons=[_shift(ring, dx, dy) for room in rooms for ring in (room.filled or room.polygons)],
+        filled_m2=sum(r.area_m2 if r.filled_m2 is None else r.filled_m2 for r in rooms),
     )
 
 

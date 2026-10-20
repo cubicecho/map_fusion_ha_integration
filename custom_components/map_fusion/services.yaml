@@ -64,6 +64,14 @@ get_map:
       example: "vacuum.d10_plus:46"
       selector:
         text:
+    variant:
+      default: traced
+      selector:
+        select:
+          translation_key: variant
+          options:
+            - traced
+            - filled
 transform_point:
   fields:
     frame_id:
@@ -130,3 +138,11 @@ locate_point:
           max: 100000
           step: any
           mode: box
+    variant:
+      default: traced
+      selector:
+        select:
+          translation_key: variant
+          options:
+            - traced
+            - filled

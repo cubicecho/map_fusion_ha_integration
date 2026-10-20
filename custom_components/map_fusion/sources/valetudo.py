@@ -93,7 +93,9 @@ def map_signature(hass: HomeAssistant, device: SourceDevice) -> tuple[Any, ...] 
     return (segments.state, tuple(sorted((str(k), str(v)) for k, v in attrs.items())))
 
 
-async def async_read(hass: HomeAssistant, device: SourceDevice) -> SourceMap | None:
+async def async_read(
+    hass: HomeAssistant, device: SourceDevice, *, fill_max_m: float = valetudo_map.DEFAULT_FILL_MAX_M
+) -> SourceMap | None:
     """Read the map from the Map data camera. None when it has no map yet."""
     camera = device.extra["camera"]
     try:
@@ -102,7 +104,7 @@ async def async_read(hass: HomeAssistant, device: SourceDevice) -> SourceMap | N
     except (HomeAssistantError, valetudo_map.ValetudoMapError) as err:
         _LOGGER.debug("%s: no readable map yet: %s", camera, err)
         return None
-    rooms = valetudo_map.rooms(vmap)
+    rooms = valetudo_map.rooms(vmap, fill_max_m=fill_max_m)
     if not rooms:
         return None
     vacuum = hass.states.get(device.vacuum)

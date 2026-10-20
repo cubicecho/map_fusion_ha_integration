@@ -109,7 +109,9 @@ def map_signature(hass: HomeAssistant, device: SourceDevice) -> tuple[Any, ...] 
     )
 
 
-async def async_read(hass: HomeAssistant, device: SourceDevice) -> SourceMap | None:
+async def async_read(
+    hass: HomeAssistant, device: SourceDevice, *, fill_max_m: float = valetudo_map.DEFAULT_FILL_MAX_M
+) -> SourceMap | None:
     """Read the current map. None when the map camera has nothing yet."""
     ents: DreameEntities = device.extra
     state = hass.states.get(ents.map_camera) if ents.map_camera else None
@@ -133,7 +135,7 @@ async def async_read(hass: HomeAssistant, device: SourceDevice) -> SourceMap | N
         try:
             image = await async_get_image(hass, ents.map_data_camera)
             vmap = valetudo_map.parse(valetudo_map.extract_from_png(image.content))
-            rooms, residual = pixel_rooms(vmap, attr_rooms)
+            rooms, residual = pixel_rooms(vmap, attr_rooms, fill_max_m=fill_max_m)
         except (HomeAssistantError, valetudo_map.ValetudoMapError) as err:
             warnings.append(f"map data unreadable, using room boxes: {err}")
             _LOGGER.warning("%s: %s", ents.map_data_camera, warnings[-1])
@@ -155,7 +157,10 @@ async def async_read(hass: HomeAssistant, device: SourceDevice) -> SourceMap | N
 
 
 def pixel_rooms(
-    vmap: valetudo_map.ValetudoMap, attr_rooms: dict[str, Rect]
+    vmap: valetudo_map.ValetudoMap,
+    attr_rooms: dict[str, Rect],
+    *,
+    fill_max_m: float = valetudo_map.DEFAULT_FILL_MAX_M,
 ) -> tuple[dict[str, SourceRoom], float | None]:
     """Room outlines, moved into the shared source frame.
 
@@ -163,7 +168,7 @@ def pixel_rooms(
     rooms' cell boxes against their attribute boxes (same sizes, constant
     offset). Without attribute boxes, Dreame's formula is used.
     """
-    rooms = valetudo_map.rooms(vmap)
+    rooms = valetudo_map.rooms(vmap, fill_max_m=fill_max_m)
     pairs = [
         (valetudo_map.cell_bounds(vmap, sid), attr_rooms[sid])
         for sid in rooms
@@ -240,6 +245,8 @@ def _shifted(room: SourceRoom, dx: float, dy: float) -> SourceRoom:
         label_point=(room.label_point[0] + dx, room.label_point[1] + dy),
         area_m2=room.area_m2,
         geometry=room.geometry,
+        filled=None if room.filled is None else [[(x + dx, y + dy) for x, y in r] for r in room.filled],
+        filled_m2=room.filled_m2,
     )
 
 

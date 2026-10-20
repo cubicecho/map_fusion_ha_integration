@@ -9,6 +9,7 @@ Outer rings run clockwise on screen, which gives them a positive
 """
 from __future__ import annotations
 
+import itertools
 import math
 from collections.abc import Iterable
 
@@ -300,3 +301,61 @@ def iou(a: list[Ring], b: list[Ring], cell: float = 0.05) -> float:
     area_a, area_b, both = overlap(a, b, cell)
     union = area_a + area_b - both
     return both / union if union else 0.0
+
+
+def fill_gaps(cells: set[Cell], blocked: set[Cell], max_gap: int) -> set[Cell]:
+    """Fill the gaps furniture leaves in a room mask ("filled" shapes).
+
+    1. Row and column gaps of up to `max_gap` cells between the room's own
+       cells are filled (beds, wardrobes, islands), repeated until stable.
+    2. Empty pockets inside the room's bounding box that touch its edge
+       (furniture in a corner) are filled when they fit in
+       `max_gap` × `max_gap`.
+
+    Nothing in `blocked` (other rooms) is ever filled, and the result stays
+    inside the room's bounding box, so the box doesn't change. Bigger
+    pockets (a real L-shaped room's missing corner) are left alone.
+    """
+    if not cells or max_gap <= 0:
+        return set(cells)
+    out = set(cells)
+    for _ in range(4):
+        before = len(out)
+        for axis in (0, 1):
+            lines: dict[int, list[int]] = {}
+            for c in out:
+                lines.setdefault(c[1 - axis], []).append(c[axis])
+            for k, vals in lines.items():
+                vals.sort()
+                for a, b in itertools.pairwise(vals):
+                    if 1 < b - a <= max_gap + 1:
+                        gap = [(v, k) if axis == 0 else (k, v) for v in range(a + 1, b)]
+                        if not any(c in blocked for c in gap):
+                            out.update(gap)
+        if len(out) == before:
+            break
+
+    xs = [c[0] for c in cells]
+    ys = [c[1] for c in cells]
+    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+    empty = {(x, y) for x in range(x0, x1 + 1) for y in range(y0, y1 + 1)} - out
+    seen: set[Cell] = set()
+    for start in empty:
+        if start in seen:
+            continue
+        piece = [start]
+        seen.add(start)
+        stack = [start]
+        while stack:
+            cx, cy = stack.pop()
+            for n in ((cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)):
+                if n in empty and n not in seen:
+                    seen.add(n)
+                    piece.append(n)
+                    stack.append(n)
+        px = [c[0] for c in piece]
+        py = [c[1] for c in piece]
+        fits = max(px) - min(px) < max_gap and max(py) - min(py) < max_gap
+        if fits and not any(c in blocked for c in piece):
+            out.update(piece)
+    return out

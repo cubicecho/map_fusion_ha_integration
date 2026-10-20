@@ -9,7 +9,8 @@ An adapter is a module with:
 - `discover(hass) -> list[SourceDevice]`
 - `map_signature(hass, device) -> Any | None`: cheap; changes when the room
   layout may have changed. `None` means "no map yet, skip".
-- `async_read(hass, device) -> SourceMap | None`: the expensive read.
+- `async_read(hass, device, *, fill_max_m) -> SourceMap | None`: the
+  expensive read. `fill_max_m` is the furniture size for filled shapes.
 """
 from __future__ import annotations
 

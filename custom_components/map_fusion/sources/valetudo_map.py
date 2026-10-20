@@ -26,6 +26,11 @@ PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 TEXT_KEY = b"ValetudoMap"
 
 
+# Furniture gaps up to this size are filled in the "filled" shapes.
+DEFAULT_FILL_MAX_M = 2.0
+FILLED_TOLERANCE_M = 0.075
+
+
 class ValetudoMapError(ValueError):
     """The data is not a usable ValetudoMap."""
 
@@ -130,12 +135,18 @@ def rooms(
     close_cells: int = 1,
     min_piece_m2: float = 0.25,
     tolerance_m: float = 0.075,
+    fill_max_m: float = DEFAULT_FILL_MAX_M,
 ) -> dict[str, SourceRoom]:
     """Polygons per segment, in metres (cells × pixelSize), y down.
 
     Each room is closed (small gaps filled) without growing into another
     room's cells, so rooms never overlap. Pieces under `min_piece_m2` are
     dropped, except a room's largest piece, which is always kept.
+
+    Each room also gets a `filled` shape: furniture gaps up to
+    `fill_max_m` filled (geometry.fill_gaps). Cells two rooms would both
+    fill go to neither, so filled shapes don't overlap either. 0 turns
+    filling off.
     """
     scale = vmap.metres_per_cell
     claimed: dict[geometry.Cell, str] = {}
@@ -143,20 +154,27 @@ def rooms(
         for cell in seg.cells:
             claimed[cell] = seg.segment_id
 
-    result: dict[str, SourceRoom] = {}
-    for seg in vmap.segments.values():
-        closed = {
+    closed: dict[str, set[geometry.Cell]] = {
+        seg.segment_id: {
             c
             for c in geometry.close_mask(seg.cells, close_cells)
             if claimed.get(c, seg.segment_id) == seg.segment_id
         }
-        min_cells = min_piece_m2 / (scale * scale)
-        rings = geometry.mask_to_polygons(
-            closed, min_piece_cells=0, tolerance_cells=tolerance_m / scale
-        )
+        for seg in vmap.segments.values()
+    }
+    filled = _filled(closed, round(fill_max_m / scale))
+    min_cells = min_piece_m2 / (scale * scale)
+
+    def polygons_of(cells: set[geometry.Cell], tolerance: float) -> list[list[tuple[float, float]]]:
+        rings = geometry.mask_to_polygons(cells, min_piece_cells=0, tolerance_cells=tolerance / scale)
         kept = [r for i, r in enumerate(rings) if i == 0 or geometry.signed_area(r) >= min_cells]
-        polygons = [[(x * scale, y * scale) for x, y in ring] for ring in kept]
+        return [[(x * scale, y * scale) for x, y in ring] for ring in kept]
+
+    result: dict[str, SourceRoom] = {}
+    for seg in vmap.segments.values():
+        polygons = polygons_of(closed[seg.segment_id], tolerance_m)
         lx, ly = geometry.label_point(seg.cells)
+        room_filled = filled.get(seg.segment_id)
         result[seg.segment_id] = SourceRoom(
             segment_id=seg.segment_id,
             name=seg.name,
@@ -165,8 +183,31 @@ def rooms(
             label_point=(lx * scale, ly * scale),
             area_m2=len(seg.cells) * scale * scale,
             geometry="pixels",
+            filled=polygons_of(room_filled, FILLED_TOLERANCE_M) if room_filled else None,
+            filled_m2=len(room_filled) * scale * scale if room_filled else None,
         )
     return result
+
+
+def _filled(closed: dict[str, set[geometry.Cell]], max_gap: int) -> dict[str, set[geometry.Cell]]:
+    """Filled cells per room. Never takes another room's cells; cells two
+    rooms would both fill go to neither."""
+    if max_gap <= 0:
+        return {}
+    owner = {c: sid for sid, cells in closed.items() for c in cells}
+    grown = {
+        sid: geometry.fill_gaps(cells, {c for c, o in owner.items() if o != sid}, max_gap)
+        for sid, cells in closed.items()
+        if cells
+    }
+    count: dict[geometry.Cell, int] = {}
+    for cells in grown.values():
+        for c in cells:
+            count[c] = count.get(c, 0) + 1
+    return {
+        sid: {c for c in cells if count[c] == 1 or owner.get(c) == sid}
+        for sid, cells in grown.items()
+    }
 
 
 def cell_bounds(vmap: ValetudoMap, segment_id: str) -> Rect:

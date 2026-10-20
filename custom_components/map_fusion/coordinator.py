@@ -42,6 +42,7 @@ from .model import FusedArea, FusedMap, Ring, SourceMap
 from .placements import Placements
 from .sources import ADAPTERS
 from .sources.base import SourceDevice
+from .sources.valetudo_map import DEFAULT_FILL_MAX_M
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -76,6 +77,7 @@ class MapFusionManager:
         self._origins: dict[str, FrameOrigin] = {}
         self._placements: Placements = {}
         self._floor_choices: dict[str, str | None] = {}
+        self._fill_max_m: float = DEFAULT_FILL_MAX_M
         self._devices: list[SourceDevice] = []
         self._poll_due: set[str] = set()  # vacuums to re-read on the next refresh
         self._maps: dict[str, SourceMap] = {}  # by vacuum entity id
@@ -103,6 +105,8 @@ class MapFusionManager:
             for frame_id, by_area in (stored.get("placements") or {}).items()
         }
         self._floor_choices = dict(stored.get("floor_choices") or {})
+        settings = stored.get("settings") or {}
+        self._fill_max_m = float(settings.get("fill_max_m", DEFAULT_FILL_MAX_M))
         self._rediscover()
         self._unsubs += [
             self.hass.bus.async_listen(er.EVENT_ENTITY_REGISTRY_UPDATED, self._on_entity_registry),
@@ -128,7 +132,7 @@ class MapFusionManager:
             self._state_unsub()
             self._state_unsub = None
         self._debouncer.async_shutdown()
-        if self._origins or self._placements or self._floor_choices:
+        if self._origins or self._placements or self._floor_choices or self._fill_max_m != DEFAULT_FILL_MAX_M:
             await self._store.async_save(self._store_data())
 
     @callback
@@ -201,6 +205,16 @@ class MapFusionManager:
         await self._store.async_save(self._store_data())
         self._rebuild()
         return frame_id
+
+    @property
+    def fill_max_m(self) -> float:
+        return self._fill_max_m
+
+    async def async_set_fill_max(self, metres: float) -> None:
+        """Largest furniture gap the filled shapes fill (0 = same as traced)."""
+        self._fill_max_m = max(0.0, float(metres))
+        await self._store.async_save(self._store_data())
+        await self.async_refresh_now(reread=True)
 
     async def async_set_floor_choice(self, source_key: str, floor_id: str | None, *, auto: bool) -> None:
         """Pin a vacuum map to a floor (or to no floor), or go back to automatic."""
@@ -328,7 +342,7 @@ class MapFusionManager:
             if not force and not due and unchanged:
                 continue
             self._last_read[device.vacuum] = dt_util.utcnow()
-            smap = await adapter.async_read(self.hass, device)
+            smap = await adapter.async_read(self.hass, device, fill_max_m=self._fill_max_m)
             if smap is not None:
                 self._maps[device.vacuum] = smap
                 self._signatures[device.vacuum] = signature
@@ -384,6 +398,7 @@ class MapFusionManager:
                 for frame_id, by_area in self._placements.items()
             },
             "floor_choices": dict(self._floor_choices),
+            "settings": {"fill_max_m": self._fill_max_m},
         }
 
     def _update_issues(self) -> None:

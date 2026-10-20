@@ -1,4 +1,5 @@
-"""One image entity per frame: the fused map drawn as SVG.
+"""Two image entities per frame: the fused map drawn as SVG, as traced
+and with furniture gaps filled.
 
 For picture cards and anything that wants a plain map image. Geometry
 stays out of the state; attributes carry only sizes and calibration.
@@ -26,22 +27,24 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     manager = entry.runtime_data
-    known: dict[str, FrameImage] = {}
+    known: dict[tuple[str, bool], FrameImage] = {}
 
     @callback
     def sync(fused: FusedMap) -> None:
         new: list[FrameImage] = []
         present = set()
         for frame in fused.frames:
-            present.add(frame.frame_id)
-            entity = known.get(frame.frame_id)
-            if entity is None:
-                entity = known[frame.frame_id] = FrameImage(hass, frame)
-                new.append(entity)
-            else:
-                entity.set_frame(frame)
-        for frame_id, entity in known.items():
-            if frame_id not in present:
+            for filled in (False, True):
+                key = (frame.frame_id, filled)
+                present.add(key)
+                entity = known.get(key)
+                if entity is None:
+                    entity = known[key] = FrameImage(hass, frame, filled=filled)
+                    new.append(entity)
+                else:
+                    entity.set_frame(frame)
+        for key, entity in known.items():
+            if key not in present:
                 entity.set_frame(None)  # e.g. its vacuum is offline: unavailable
         if new:
             async_add_entities(new)
@@ -55,10 +58,12 @@ class FrameImage(ImageEntity):
     _attr_content_type = "image/svg+xml"
     _attr_icon = "mdi:floor-plan"
 
-    def __init__(self, hass: HomeAssistant, frame: FusedFrame) -> None:
+    def __init__(self, hass: HomeAssistant, frame: FusedFrame, *, filled: bool = False) -> None:
         super().__init__(hass)
-        self._attr_unique_id = f"frame_{frame.frame_id}"
-        self._attr_name = f"Map Fusion {frame.name}"
+        self._filled = filled
+        suffix = "_filled" if filled else ""
+        self._attr_unique_id = f"frame_{frame.frame_id}{suffix}"
+        self._attr_name = f"Map Fusion {frame.name}{' filled' if filled else ''}"
         self._frame: FusedFrame | None = None
         self._rendered: RenderedFrame | None = None
         self._signature: Any = None
@@ -72,7 +77,9 @@ class FrameImage(ImageEntity):
     def extra_state_attributes(self) -> dict[str, Any] | None:
         if self._frame is None or self._rendered is None:
             return None
-        return attributes(self._frame, self._rendered, SCHEMA_VERSION)
+        attrs = attributes(self._frame, self._rendered, SCHEMA_VERSION)
+        attrs["variant"] = "filled" if self._filled else "traced"
+        return attrs
 
     async def async_image(self) -> bytes | None:
         return self._rendered.svg if self._rendered else None
@@ -90,6 +97,6 @@ class FrameImage(ImageEntity):
         self._signature = signature
         self._frame = frame
         if frame is not None:
-            self._rendered = render(frame)
+            self._rendered = render(frame, filled=self._filled)
             self._attr_image_last_updated = dt_util.utcnow()
         return True

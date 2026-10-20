@@ -23,7 +23,8 @@
         "menu_options": {
           "place_area": "Place an area on the map",
           "clear_area": "Remove a placed area",
-          "map_floor": "Choose a vacuum map's floor"
+          "map_floor": "Choose a vacuum map's floor",
+          "filled_shapes": "Filled room shapes (furniture)"
         }
       },
       "place_area": {
@@ -57,6 +58,13 @@
         "data": {
           "map": "Vacuum map",
           "floor": "Floor"
+        }
+      },
+      "filled_shapes": {
+        "title": "Filled room shapes",
+        "description": "Map Fusion also makes a \"filled\" version of each room: gaps the vacuum can't reach (beds, wardrobes, islands) are filled in, without growing into other rooms or past the room's bounding box. Gaps up to this size are filled. Bigger ones, like a real L-shaped room's missing corner, are left. 0 turns filling off.",
+        "data": {
+          "fill_max_m": "Largest furniture to fill"
         }
       }
     },
@@ -127,6 +135,10 @@
         "frame_id": {
           "name": "Map",
           "description": "Frame id from map_fusion/get. Optional when there is only one map."
+        },
+        "variant": {
+          "name": "Shapes",
+          "description": "traced: what the vacuum mapped. filled: furniture gaps filled in."
         }
       }
     },
@@ -175,6 +187,10 @@
         "y": {
           "name": "y",
           "description": "y in map metres (or vacuum units with Vacuum set)."
+        },
+        "variant": {
+          "name": "Shapes",
+          "description": "traced: what the vacuum mapped. filled: furniture gaps filled in."
         }
       }
     }
@@ -184,6 +200,12 @@
       "options": {
         "source": "Map → vacuum",
         "frame": "Vacuum → map"
+      }
+    },
+    "variant": {
+      "options": {
+        "traced": "As traced",
+        "filled": "Furniture filled"
       }
     }
   }

@@ -118,6 +118,8 @@ def _moved_room(room: SourceRoom, t: Transform) -> SourceRoom:
         label_point=t.apply(room.label_point),
         area_m2=room.area_m2,
         geometry=room.geometry,
+        filled=None if room.filled is None else [[t.apply(p) for p in ring] for ring in room.filled],
+        filled_m2=room.filled_m2,
     )
 
 

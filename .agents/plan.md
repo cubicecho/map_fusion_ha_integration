@@ -215,6 +215,7 @@ These changes live in the presence-map-card repo. This repo only provides the AP
    - Valetudo has no room boxes, so there's no bbox fallback; its map is re-read every 10 minutes because HA sees no state change when the map image updates.
    - Not tested on a real Valetudo robot (only synthetic data). Entity unique ids were taken from Valetudo's source.
    - Xiaomi Cloud Map Extractor (bbox only) moves to its own step.
+5b. **Filled shapes** ✅ (2026-10-20, v0.2.0). A second shape per room with furniture gaps filled (`geometry.fill_gaps`, row/column gaps + corner pockets up to a size limit, default 2 m, set in the options). Served through a `variant` on the read APIs, a second image entity per frame, and presence-map-card's `map_fusion.variant: filled`. On the D10 Plus, the Master Bedroom goes from 13.3 to 18.9 m² and from 77 to 27 outline points; rooms keep their boxes and don't overlap.
 6. **Extras.** Walls/doors layer in the output, polygon point editing, a repair issue when a source's rooms change.
 
 ## Open questions

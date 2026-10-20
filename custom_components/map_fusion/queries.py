@@ -8,10 +8,15 @@ from __future__ import annotations
 from typing import Any
 
 from .geometry import distance_to_ring, point_in_ring
-from .model import FusedFrame, FusedMap, Point, Transform
+from .model import FusedArea, FusedFrame, FusedMap, Point, Ring, Transform
 
 # Vacuum outlines stop a few cm short of walls and doorways.
 NEAR_M = 0.1
+
+# Shape variants: what the vacuum traced, or with furniture gaps filled.
+TRACED = "traced"
+FILLED = "filled"
+VARIANTS = (TRACED, FILLED)
 
 
 class QueryError(ValueError):
@@ -65,21 +70,26 @@ def to_source(frame: FusedFrame, source_id: str | None, point: Point) -> tuple[s
     return sid, native_to_frame.inverse().apply(point)
 
 
-def locate(frame: FusedFrame, point: Point, near_m: float = NEAR_M) -> dict[str, Any]:
+def locate(
+    frame: FusedFrame, point: Point, near_m: float = NEAR_M, variant: str = TRACED
+) -> dict[str, Any]:
     """The area a frame point is in.
 
     Inside an outline wins; where shapes overlap (boxes, manual shapes) the
     smallest area wins, as the most specific. Otherwise the nearest area
     within `near_m` counts. `area_id` is None when nothing is close.
     """
-    inside = [a for a in frame.areas if any(point_in_ring(point, r) for r in a.polygons)]
+    def shape(a: FusedArea) -> list[Ring]:
+        return (a.filled_polygons or a.polygons) if variant == FILLED else a.polygons
+
+    inside = [a for a in frame.areas if any(point_in_ring(point, r) for r in shape(a))]
     if inside:
         best = min(inside, key=lambda a: a.area_m2)
         return {"area_id": best.area_id, "name": best.name, "inside": True, "distance_m": 0.0}
     nearest = None
     nearest_d = near_m
     for area in frame.areas:
-        d = min((distance_to_ring(point, r) for r in area.polygons), default=float("inf"))
+        d = min((distance_to_ring(point, r) for r in shape(area)), default=float("inf"))
         if d <= nearest_d:
             nearest, nearest_d = area, d
     if nearest is None:
@@ -87,11 +97,25 @@ def locate(frame: FusedFrame, point: Point, near_m: float = NEAR_M) -> dict[str,
     return {"area_id": nearest.area_id, "name": nearest.name, "inside": False, "distance_m": round(nearest_d, 3)}
 
 
-def document(fused: FusedMap | None, frame_id: str | None = None) -> dict[str, Any] | None:
-    """The fused map as JSON, optionally only one frame."""
+def document(
+    fused: FusedMap | None, frame_id: str | None = None, variant: str = TRACED
+) -> dict[str, Any] | None:
+    """The fused map as JSON, optionally only one frame.
+
+    With `variant="filled"`, `polygons` (and `area_m2`) are the filled
+    shapes, so consumers that only read `polygons` get them unchanged.
+    `rect` is the same in both variants.
+    """
     if fused is None:
         return None
     doc = fused.as_dict()
+    doc["variant"] = variant
     if frame_id is not None:
         doc["frames"] = [f for f in doc["frames"] if f["frame_id"] == frame_id]
+    if variant == FILLED:
+        for frame in doc["frames"]:
+            for area in frame["areas"]:
+                area["polygons"], area["area_m2"] = area["filled_polygons"], area["filled_m2"]
+            for room in frame["unmapped_rooms"]:
+                room["polygons"] = room["filled_polygons"]
     return doc

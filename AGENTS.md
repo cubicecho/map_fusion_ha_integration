@@ -62,6 +62,7 @@ tests/
 - **Polygons, with a bounding `rect` alongside.** Dreame room polygons are traced from the `map_data` camera's ValetudoMap pixels (no extra dependencies). `rect` (same fields as presence-map-card) is always included for rectangle-only consumers. When `map_data` is disabled, fall back to the `rooms` bounding boxes.
 - **Map Fusion owns area geometry.** Users can place areas no vacuum covers (or override one). Placements live in `.storage/map_fusion`, keyed by frame + area, in that frame's coordinates.
 - **Frame origins are stored, not recomputed**, so hand-placed areas don't move when a vacuum re-maps. When a map changes frame id (its areas get a floor, or the user picks one), its origin and placements move with it (`merge._migrate`).
+- **Two shape variants:** `polygons` (what the vacuum traced) and `filled_polygons` (furniture gaps filled, computed in `valetudo_map.rooms` from the cells). Filling never leaves the room's bounding box, so `rect` is the same for both. Read APIs take `variant`.
 - **`merge.build` stays pure:** it takes stored state (origins, placements, floor choices) and returns the updated state; the manager stores it.
 - **First source: Dreame** (Tasshack/dreame-vacuum). **First consumer: presence-map-card.**
 - **Source adapters own all vendor parsing.** The fusion code only sees the normalized `SourceMap` model: metres, y down, plus `to_native`. A new source is a module with the functions in `sources/base.py`, added to `ADAPTERS`.
