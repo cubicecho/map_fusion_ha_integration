@@ -19,16 +19,45 @@ jobs:
           python-version: "3.14"
           cache: pip
 
+      - name: Install system libraries
+        # HA's camera component imports PyTurboJPEG, which needs libturbojpeg.
+        run: sudo apt-get update && sudo apt-get install -y libturbojpeg0
+
       - name: Install dependencies
-        run: pip install ".[test]"
+        # Not editable (-e): HA's custom-component loader can't read editable
+        # installs. Pytest puts the repo on the path itself.
+        run: pip install ".[test]" ruff mypy && pip uninstall -y map-fusion-ha-integration
+
+      - name: Lint
+        run: ruff check custom_components/ tests/
+
+      - name: Type check
+        run: mypy custom_components/map_fusion/
 
       - name: Run tests
         run: pytest --tb=short
 
+  hassfest:
+    name: Hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    name: HACS validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hacs/action@main
+        with:
+          category: integration
+          # Brand icons live in home-assistant/brands; not needed for custom repositories.
+          ignore: brands
 
   release:
     name: Release
-    needs: [test]
+    needs: [test, hassfest, hacs]
     runs-on: ubuntu-latest
     # Only release on direct pushes to main, not on PRs.
     if: github.event_name == 'push'
