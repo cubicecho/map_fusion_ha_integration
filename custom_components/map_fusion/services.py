@@ -42,6 +42,8 @@ SERVICE_CLEAR_AREA = "clear_area"
 SERVICE_GET_MAP = "get_map"
 SERVICE_TRANSFORM_POINT = "transform_point"
 SERVICE_LOCATE_POINT = "locate_point"
+SERVICE_SET_FEATURE = "set_feature"
+SERVICE_REMOVE_FEATURE = "remove_feature"
 
 RECT_FIELDS = ("x", "y", "width", "height")
 
@@ -68,12 +70,32 @@ TRANSFORM_POINT_SCHEMA = vol.Schema(
     {**POINT_FIELDS, vol.Optional("to", default="source"): vol.In(["source", "frame"])}
 )
 LOCATE_POINT_SCHEMA = vol.Schema({**POINT_FIELDS, **VARIANT})
+SET_FEATURE_SCHEMA = vol.Schema(
+    {
+        vol.Optional("feature_id"): cv.string,
+        vol.Optional("frame_id"): cv.string,
+        vol.Required("kind"): cv.string,
+        vol.Required("points"): list,
+        vol.Optional("name"): cv.string,
+        vol.Optional("entity_id"): cv.entity_id,
+        vol.Optional("areas"): [cv.string],
+    }
+)
+REMOVE_FEATURE_SCHEMA = vol.Schema({vol.Required("feature_id"): cv.string})
 
 
 @callback
 def async_register(hass: HomeAssistant) -> None:
     hass.services.async_register(DOMAIN, SERVICE_SET_AREA, _set_area, schema=SET_AREA_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_CLEAR_AREA, _clear_area, schema=CLEAR_AREA_SCHEMA)
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_FEATURE,
+        _set_feature,
+        schema=SET_FEATURE_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(DOMAIN, SERVICE_REMOVE_FEATURE, _remove_feature, schema=REMOVE_FEATURE_SCHEMA)
     for name, handler, schema in (
         (SERVICE_GET_MAP, _get_map, GET_MAP_SCHEMA),
         (SERVICE_TRANSFORM_POINT, _transform_point, TRANSFORM_POINT_SCHEMA),
@@ -161,3 +183,15 @@ async def _locate_point(call: ServiceCall) -> ServiceResponse:
         "y": round(point[1], 4),
         **locate(frame, point, variant=call.data["variant"]),
     }
+
+
+async def _set_feature(call: ServiceCall) -> ServiceResponse:
+    """Add a door/window/… (no feature_id) or replace one. Returns it."""
+    manager = _manager(call.hass)
+    data = {k: call.data.get(k) for k in ("kind", "points", "name", "entity_id", "areas")}
+    feature = await manager.async_set_feature(data, call.data.get("frame_id"), call.data.get("feature_id"))
+    return feature.as_dict() if call.return_response else None
+
+
+async def _remove_feature(call: ServiceCall) -> None:
+    await _manager(call.hass).async_remove_feature(call.data["feature_id"])

@@ -170,6 +170,32 @@ class FusedArea:
 
 
 @dataclass(slots=True)
+class FusedFeature:
+    """A door, window, … placed on the map (see features.py)."""
+
+    feature_id: str
+    kind: str
+    name: str | None
+    points: list[Point]
+    entity_id: str | None
+    areas: list[str]
+    areas_auto: bool  # True when `areas` was worked out from the map
+
+    def as_dict(self) -> dict[str, Any]:
+        (x0, y0), (x1, y1) = self.points[0], self.points[-1]
+        return {
+            "feature_id": self.feature_id,
+            "kind": self.kind,
+            "name": self.name,
+            "points": [[_r(x), _r(y)] for x, y in self.points],
+            "length_m": _r(((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5, 2),
+            "entity_id": self.entity_id,
+            "areas": self.areas,
+            "areas_auto": self.areas_auto,
+        }
+
+
+@dataclass(slots=True)
 class FusedFrame:
     frame_id: str
     floor_id: str | None
@@ -179,6 +205,7 @@ class FusedFrame:
     unmapped_rooms: list[dict[str, Any]]
     overlaps: list[dict[str, Any]]
     sources: list[dict[str, Any]]
+    features: list[FusedFeature] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -190,6 +217,7 @@ class FusedFrame:
             "unmapped_rooms": self.unmapped_rooms,
             "overlaps": self.overlaps,
             "sources": self.sources,
+            "features": [f.as_dict() for f in self.features],
         }
 
 
@@ -199,6 +227,8 @@ class FusedMap:
     generated_at: str
     frames: list[FusedFrame]
     unplaced_areas: list[dict[str, Any]]
+    # What feature kinds exist (features.KINDS), so consumers can adapt.
+    feature_kinds: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -206,6 +236,7 @@ class FusedMap:
             "generated_at": self.generated_at,
             "frames": [f.as_dict() for f in self.frames],
             "unplaced_areas": self.unplaced_areas,
+            "feature_kinds": self.feature_kinds,
         }
 
     def frame(self, frame_id: str) -> FusedFrame | None:

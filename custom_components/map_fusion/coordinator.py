@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
 from typing import Any
@@ -35,10 +36,11 @@ from homeassistant.helpers.event import (
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
+from . import features as ft
 from . import placements as pl
 from .const import DOMAIN
 from .merge import AreaInfo, FrameOrigin, SourceInput, build
-from .model import FusedArea, FusedMap, Ring, SourceMap
+from .model import FusedArea, FusedFeature, FusedMap, Ring, SourceMap
 from .placements import Placements
 from .sources import ADAPTERS
 from .sources.base import SourceDevice
@@ -76,6 +78,7 @@ class MapFusionManager:
         self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, STORAGE_KEY)
         self._origins: dict[str, FrameOrigin] = {}
         self._placements: Placements = {}
+        self._features: ft.Features = {}
         self._floor_choices: dict[str, str | None] = {}
         self._fill_max_m: float = DEFAULT_FILL_MAX_M
         self._devices: list[SourceDevice] = []
@@ -105,6 +108,9 @@ class MapFusionManager:
             for frame_id, by_area in (stored.get("placements") or {}).items()
         }
         self._floor_choices = dict(stored.get("floor_choices") or {})
+        self._features = {
+            frame_id: dict(by_id) for frame_id, by_id in (stored.get("features") or {}).items()
+        }
         settings = stored.get("settings") or {}
         self._fill_max_m = float(settings.get("fill_max_m", DEFAULT_FILL_MAX_M))
         self._rediscover()
@@ -132,7 +138,13 @@ class MapFusionManager:
             self._state_unsub()
             self._state_unsub = None
         self._debouncer.async_shutdown()
-        if self._origins or self._placements or self._floor_choices or self._fill_max_m != DEFAULT_FILL_MAX_M:
+        if (
+            self._origins
+            or self._placements
+            or self._features
+            or self._floor_choices
+            or self._fill_max_m != DEFAULT_FILL_MAX_M
+        ):
             await self._store.async_save(self._store_data())
 
     @callback
@@ -216,6 +228,77 @@ class MapFusionManager:
         await self._store.async_save(self._store_data())
         await self.async_refresh_now(reread=True)
 
+    # Features (doors, windows, …) ------------------------------------------
+
+    @property
+    def features(self) -> ft.Features:
+        return self._features
+
+    async def async_set_feature(
+        self, data: dict[str, Any], frame_id: str | None = None, feature_id: str | None = None
+    ) -> FusedFeature:
+        """Add a feature (no `feature_id`) or replace one. Returns it as built."""
+        try:
+            feature = ft.normalise(data)
+        except ft.InvalidFeature as err:
+            raise PlacementError("invalid_format", str(err)) from err
+        entity_id = feature["entity_id"]
+        if (
+            entity_id
+            and self.hass.states.get(entity_id) is None
+            and er.async_get(self.hass).async_get(entity_id) is None
+        ):
+            raise PlacementError("not_found", f"Entity {entity_id} does not exist")
+        for area_id in feature["areas"] or []:
+            if ar.async_get(self.hass).async_get_area(area_id) is None:
+                raise PlacementError("not_found", f"Area {area_id} does not exist")
+        if feature_id is not None:
+            current = self._feature_frame(feature_id)
+            if current is None:
+                raise PlacementError("not_found", f"Feature {feature_id} does not exist")
+            if frame_id is not None and frame_id != current:
+                raise PlacementError("invalid_format", "A feature can't move to another frame; remove it and add it there")
+            frame_id = current
+        else:
+            frame_id = self._resolve_any_frame(frame_id)
+            feature_id = uuid.uuid4().hex[:12]
+        self._features.setdefault(frame_id, {})[feature_id] = feature
+        await self._store.async_save(self._store_data())
+        self._rebuild()
+        assert self.fused is not None
+        frame = self.fused.frame(frame_id)
+        built = next((f for f in frame.features if f.feature_id == feature_id), None) if frame else None
+        if built is None:
+            raise PlacementError("not_found", f"Frame {frame_id} is not available right now")
+        return built
+
+    async def async_remove_feature(self, feature_id: str) -> str:
+        """Remove a feature. Returns the frame it was in."""
+        frame_id = self._feature_frame(feature_id)
+        if frame_id is None:
+            raise PlacementError("not_found", f"Feature {feature_id} does not exist")
+        del self._features[frame_id][feature_id]
+        if not self._features[frame_id]:
+            del self._features[frame_id]
+        await self._store.async_save(self._store_data())
+        self._rebuild()
+        return frame_id
+
+    def _feature_frame(self, feature_id: str) -> str | None:
+        return next((f for f, by_id in self._features.items() if feature_id in by_id), None)
+
+    def _resolve_any_frame(self, frame_id: str | None) -> str:
+        """A built frame or an HA floor; the only frame when not given."""
+        frames = {f.frame_id for f in self.fused.frames} if self.fused else set()
+        floors = {f.floor_id for f in fr.async_get(self.hass).async_list_floors()}
+        if frame_id is None:
+            if len(frames) == 1:
+                return next(iter(frames))
+            raise PlacementError("frame_required", "There is more than one map frame; give a frame_id")
+        if frame_id not in frames and frame_id not in floors:
+            raise PlacementError("not_found", f"Frame {frame_id} does not exist")
+        return frame_id
+
     async def async_set_floor_choice(self, source_key: str, floor_id: str | None, *, auto: bool) -> None:
         """Pin a vacuum map to a floor (or to no floor), or go back to automatic."""
         if auto:
@@ -292,6 +375,11 @@ class MapFusionManager:
                 changed = True
                 if not self._placements[frame_id]:
                     del self._placements[frame_id]
+        for by_id in self._features.values():
+            for feature in by_id.values():
+                if feature.get("areas") and area_id in feature["areas"]:
+                    feature["areas"] = [a for a in feature["areas"] if a != area_id]
+                    changed = True
         if changed:
             self._store.async_delay_save(self._store_data, 1)
 
@@ -360,9 +448,15 @@ class MapFusionManager:
             origins=self._origins,
             generated_at=dt_util.utcnow().isoformat(),
             placements=self._placements,
+            features=self._features,
             floor_choices=self._floor_choices,
         )
-        if result.origins != self._origins or result.placements != self._placements:
+        if (
+            result.origins != self._origins
+            or result.placements != self._placements
+            or result.features != self._features
+        ):
+            self._features = result.features
             self._origins = result.origins
             self._placements = result.placements
             self._store.async_delay_save(self._store_data, 1)
@@ -399,6 +493,7 @@ class MapFusionManager:
             },
             "floor_choices": dict(self._floor_choices),
             "settings": {"fill_max_m": self._fill_max_m},
+            "features": {frame_id: dict(by_id) for frame_id, by_id in self._features.items()},
         }
 
     def _update_issues(self) -> None:

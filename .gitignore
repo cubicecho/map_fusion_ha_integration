@@ -22,3 +22,4 @@ tests/fixtures/dreame_d10_plus_camera.json
 tests/fixtures/dreame_d10_plus_vacuum.json
 .venv-tmp/
 frontend/node_modules/
+.claude/worktrees/

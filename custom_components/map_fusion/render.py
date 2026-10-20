@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 from xml.sax.saxutils import escape
 
-from .model import FusedFrame, Point, Rect, Ring, Transform
+from .model import FusedFeature, FusedFrame, Point, Rect, Ring, Transform
 
 PX_PER_M = 50
 PAD_M = 0.3
@@ -29,7 +29,39 @@ class RenderedFrame:
     calibration_points: list[dict[str, dict[str, float]]] | None
 
 
-def render(frame: FusedFrame, *, filled: bool = False) -> RenderedFrame:
+# Doors and windows: (colour when closed, line width px). Open ones are drawn red.
+FEATURE_STYLE = {"door": ("#6d4c41", 6), "window": ("#0288d1", 5)}
+OPEN_COLOUR = "#e53935"
+
+
+def _feature_svg(
+    feature: FusedFeature, to_image: Transform, state: str = "unknown", scale: float = 1.0
+) -> str:
+    """A door or window as a thick line across the wall, coloured by open/closed."""
+    colour, width = FEATURE_STYLE.get(feature.kind, ("#616161", 5))
+    if state == "open":
+        colour = OPEN_COLOUR
+    (x0, y0), (x1, y1) = (to_image.apply(p) for p in (feature.points[0], feature.points[-1]))
+    w = width * scale
+    dash = ' stroke-dasharray="4 3"' if state == "unknown" and feature.entity_id else ""
+    title = escape(feature.name or feature.kind.title())
+    line = (
+        f'<line class="feature feature-{feature.kind} {state}" x1="{x0:.1f}" y1="{y0:.1f}" x2="{x1:.1f}" y2="{y1:.1f}" '
+        f'stroke="{colour}" stroke-width="{w:g}" stroke-linecap="butt"{dash}><title>{title}</title></line>'
+    )
+    if feature.kind == "window":
+        # A thin pale line down the middle reads as glass.
+        line += (
+            f'<line x1="{x0:.1f}" y1="{y0:.1f}" x2="{x1:.1f}" y2="{y1:.1f}" stroke="#e1f5fe" '
+            f'stroke-width="{max(1.0, w / 3):g}"/>'
+        )
+    return line
+
+
+def render(
+    frame: FusedFrame, *, filled: bool = False, states: dict[str, str] | None = None
+) -> RenderedFrame:
+    """The frame as SVG. `states` maps feature ids to "open" / "closed" / "unknown"."""
     bounds = frame.bounds or Rect(0, 0, 1, 1)
     to_image = Transform(
         a=PX_PER_M,
@@ -65,6 +97,8 @@ def render(frame: FusedFrame, *, filled: bool = False) -> RenderedFrame:
             f'<path class="{cls}" fill="{fill}" d="{_path(shape, to_image)}">'
             f"<title>{escape(area.name)}</title></path>"
         )
+    for feature in frame.features:
+        parts.append(_feature_svg(feature, to_image, (states or {}).get(feature.feature_id, "unknown")))
     for area in frame.areas:
         x, y = to_image.apply(area.label_point)
         parts.append(f'<text class="label" x="{x:.1f}" y="{y:.1f}">{escape(area.name)}</text>')
@@ -206,6 +240,8 @@ def render_preview(
     for area in areas:
         x, y = to_image.apply(area.label_point)
         out.append(f'<text class="label" x="{x:.1f}" y="{y:.1f}">{escape(area.name)}</text>')
+    for feature in frame.features if frame else []:
+        out.append(_feature_svg(feature, to_image, scale=0.8))
     if current is not None:
         out.append(f'<path class="current" d="{_path(current.polygons, to_image)}"/>')
     if proposal:

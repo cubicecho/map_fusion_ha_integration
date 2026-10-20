@@ -91,6 +91,46 @@ What cards and integrations get from Map Fusion. Everything here is a proposal. 
 
 Why include `transform` per source: cards can turn a click on the fused map into vacuum coordinates (go-to, zone clean), and live data such as the robot's position can be drawn without Map Fusion re-sending the whole document.
 
+## Features: doors, windows, …
+
+Things placed on the map that aren't areas. Each frame has `features`:
+
+```jsonc
+"features": [
+  {
+    "feature_id": "3f9a1c2b7d4e",   // stable id
+    "kind": "door",                 // a key of the top-level feature_kinds
+    "name": "Kitchen door",         // or null
+    "points": [[2.03, 0.2], [2.03, 0.8]],  // the two ends of the opening, frame metres
+    "length_m": 0.6,
+    "entity_id": "binary_sensor.kitchen_door",  // or null
+    "areas": ["kitchen", "office"], // the areas it joins (left side of a→b first)
+    "areas_auto": true              // worked out from the map (false: set by the user)
+  }
+]
+```
+
+The top-level `feature_kinds` describes each kind, so consumers handle new kinds without code changes:
+
+```jsonc
+"feature_kinds": {
+  "door":   { "name": "Door", "icon": "mdi:door", "geometry": "segment", "max_areas": 2,
+              "entity_domains": { "binary_sensor": ["door", "garage_door", "opening"], "cover": ["door", "garage", "gate"] } },
+  "window": { "name": "Window", "icon": "mdi:window-closed-variant", "geometry": "segment", "max_areas": 2,
+              "entity_domains": { "binary_sensor": ["opening", "window"], "cover": ["awning", "blind", "curtain", "shade", "shutter", "window"] } }
+}
+```
+
+- Geometry `segment`: a line along a wall. Later kinds may use other geometries (a point for a vent, a polygon for stairs); check `geometry` before drawing.
+- `entity_domains`: which entities can be linked. The domain is enforced; device classes are suggestions for pickers.
+- Open or closed comes from the linked entity, not the document: a `binary_sensor` is open when `on`; a `cover` when `open`, `opening` or `closing`. Cards read the state from `hass.states`.
+- Auto `areas`: probes 15–50 cm either side of the line's middle; a side counts when inside an area's outline or within 10 cm. A window usually joins one area (the other side is outside).
+- Stored per frame, like placements, and moved with the frame when its id changes. Deleting an area removes it from features' explicit `areas`. Kinds this version doesn't know are kept in storage but not shown.
+
+Write APIs (admin): WS `map_fusion/feature/set` `{kind, points, name?, entity_id?, areas?, frame_id?, feature_id?}` adds a feature (no `feature_id`) or replaces one and returns it; WS `map_fusion/feature/remove` `{feature_id}`. Services `map_fusion.set_feature` (optionally returns the feature) and `map_fusion.remove_feature`. Errors: `invalid_format` (bad kind, points, or an entity of the wrong domain), `not_found` (entity, area, frame or feature), `frame_required`.
+
+The image entities draw doors (brown) and windows (blue) across the wall, red when open and dashed when the linked entity's state is unknown, and redraw when it changes.
+
 ## Filled shapes
 
 Vacuums map the floor they can reach, so beds, wardrobes and kitchen islands leave holes and notches. Every area (and unmapped room) also carries `filled_polygons`: the same room with those gaps filled in, closer to its real walls.

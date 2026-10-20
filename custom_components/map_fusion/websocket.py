@@ -1,7 +1,8 @@
 """Websocket API.
 
 Read: `map_fusion/get`, `map_fusion/subscribe`.
-Write (admin): `map_fusion/area/set`, `map_fusion/area/clear`.
+Write (admin): `map_fusion/area/set`, `map_fusion/area/clear`,
+`map_fusion/feature/set`, `map_fusion/feature/remove` (doors, windows, …).
 """
 from __future__ import annotations
 
@@ -28,6 +29,8 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_subscribe)
     websocket_api.async_register_command(hass, ws_area_set)
     websocket_api.async_register_command(hass, ws_area_clear)
+    websocket_api.async_register_command(hass, ws_feature_set)
+    websocket_api.async_register_command(hass, ws_feature_remove)
 
 
 @websocket_api.websocket_command(
@@ -146,6 +149,57 @@ async def ws_area_clear(
         return
     try:
         frame_id = await manager.async_clear_area(msg["area_id"], msg.get("frame_id"))
+    except PlacementError as err:
+        connection.send_error(msg["id"], err.code, str(err))
+        return
+    connection.send_result(msg["id"], {"frame_id": frame_id})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/feature/set",
+        vol.Optional("feature_id"): str,
+        vol.Optional("frame_id"): str,
+        vol.Required("kind"): str,
+        vol.Required("points"): list,
+        vol.Optional("name"): vol.Any(str, None),
+        vol.Optional("entity_id"): vol.Any(str, None),
+        vol.Optional("areas"): vol.Any(list, None),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_feature_set(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Add a door/window/… (no feature_id) or replace one. Returns it."""
+    manager = get_manager(hass)
+    if manager is None:
+        connection.send_error(msg["id"], "not_loaded", "Map Fusion is not set up")
+        return
+    data = {k: msg.get(k) for k in ("kind", "points", "name", "entity_id", "areas")}
+    try:
+        feature = await manager.async_set_feature(data, msg.get("frame_id"), msg.get("feature_id"))
+    except PlacementError as err:
+        connection.send_error(msg["id"], err.code, str(err))
+        return
+    connection.send_result(msg["id"], feature.as_dict())
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/feature/remove", vol.Required("feature_id"): str}
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_feature_remove(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    manager = get_manager(hass)
+    if manager is None:
+        connection.send_error(msg["id"], "not_loaded", "Map Fusion is not set up")
+        return
+    try:
+        frame_id = await manager.async_remove_feature(msg["feature_id"])
     except PlacementError as err:
         connection.send_error(msg["id"], err.code, str(err))
         return

@@ -16,9 +16,11 @@ from typing import Any
 from . import placements as pl
 from .align import Fit, area_centres, fit, moved
 from .const import SCHEMA_VERSION
+from .features import KINDS, Features, kinds_doc, sides
 from .geometry import iou, overlap
 from .model import (
     FusedArea,
+    FusedFeature,
     FusedFrame,
     FusedMap,
     Geometry,
@@ -73,6 +75,8 @@ class BuildResult:
     origins: dict[str, FrameOrigin] = field(default_factory=dict)
     # Placements to store (moved along when a frame id changed).
     placements: Placements = field(default_factory=dict)
+    # Doors, windows, … to store (moved along the same way).
+    features: Features = field(default_factory=dict)
 
 
 def build(
@@ -83,6 +87,7 @@ def build(
     generated_at: str,
     placements: Placements | None = None,
     floor_choices: dict[str, str | None] | None = None,
+    features: Features | None = None,
 ) -> BuildResult:
     """Build the fused map.
 
@@ -96,6 +101,7 @@ def build(
     """
     new_origins = dict(origins)
     new_placements: Placements = {f: dict(a) for f, a in (placements or {}).items()}
+    new_features: Features = {f: dict(a) for f, a in (features or {}).items()}
     choices = floor_choices or {}
 
     # 1. Which frame each source map goes in. Maps that anchored a frame
@@ -122,7 +128,7 @@ def build(
 
     # 2. Origins and placements follow their anchor to its frame id.
     for group in groups:
-        _migrate(group.anchor.map.key, group.frame_id, used_frame_ids, new_origins, new_placements)
+        _migrate(group.anchor.map.key, group.frame_id, used_frame_ids, new_origins, new_placements, new_features)
 
     # 3. Frames.
     frames: list[FusedFrame] = []
@@ -145,14 +151,19 @@ def build(
         frames.append(frame)
     frames.sort(key=lambda f: [g.frame_id for g in groups].index(f.frame_id))
 
-    # Floors with placements but no vacuum: a frame of placements only.
-    for frame_id in sorted(set(new_placements) - used_frame_ids):
+    # Floors with placements or features but no vacuum: a hand-made frame.
+    for frame_id in sorted((set(new_placements) | set(new_features)) - used_frame_ids):
         if frame_id not in floor_names:
-            continue  # its vacuum is missing right now; keep the placements
-        frame = _manual_frame(frame_id, floor_names[frame_id], areas, new_placements[frame_id])
-        if frame.areas:
+            continue  # its vacuum is missing right now; keep what's stored
+        frame = _manual_frame(frame_id, floor_names[frame_id], areas, new_placements.get(frame_id, {}))
+        if frame.areas or new_features.get(frame_id):
             placed.update(a.area_id for a in frame.areas)
             frames.append(frame)
+
+    for frame in frames:
+        frame.features = _features(frame, new_features.get(frame.frame_id, {}), areas)
+        if frame.features and frame.bounds is None:
+            frame.bounds = Rect.from_points([p for f in frame.features for p in f.points])
 
     unplaced = [
         {"area_id": a.area_id, "name": a.name, "floor_id": a.floor_id}
@@ -160,9 +171,45 @@ def build(
         if a.area_id not in placed
     ]
     fused = FusedMap(
-        version=SCHEMA_VERSION, generated_at=generated_at, frames=frames, unplaced_areas=unplaced
+        version=SCHEMA_VERSION,
+        generated_at=generated_at,
+        frames=frames,
+        unplaced_areas=unplaced,
+        feature_kinds=kinds_doc(),
     )
-    return BuildResult(fused=fused, origins=new_origins, placements=new_placements)
+    return BuildResult(
+        fused=fused, origins=new_origins, placements=new_placements, features=new_features
+    )
+
+
+def _features(
+    frame: FusedFrame, stored: dict[str, dict[str, Any]], areas: dict[str, AreaInfo]
+) -> list[FusedFeature]:
+    """The frame's doors, windows, … with the areas they join worked out."""
+    outlines = [(a.area_id, a.polygons) for a in frame.areas]
+    out: list[FusedFeature] = []
+    for feature_id, f in sorted(stored.items(), key=lambda kv: (kv[1]["kind"], kv[0])):
+        kind = KINDS.get(f["kind"])
+        if kind is None:
+            continue  # a kind from a newer version; keep it stored
+        a, b = (tuple(f["points"][0]), tuple(f["points"][-1]))
+        explicit = f.get("areas")
+        if explicit is not None:
+            joined = [x for x in explicit if x in areas]
+        else:
+            joined = sides(outlines, a, b, kind.max_areas)  # type: ignore[arg-type]
+        out.append(
+            FusedFeature(
+                feature_id=feature_id,
+                kind=kind.key,
+                name=f.get("name"),
+                points=[(float(x), float(y)) for x, y in f["points"]],
+                entity_id=f.get("entity_id"),
+                areas=joined,
+                areas_auto=explicit is None,
+            )
+        )
+    return out
 
 
 def _linked(src: SourceInput) -> set[str]:
@@ -193,8 +240,9 @@ def _migrate(
     used_frame_ids: set[str],
     origins: dict[str, FrameOrigin],
     placements: Placements,
+    features: Features,
 ) -> None:
-    """Move a source's stored frame (origin + placements) to its new id."""
+    """Move a source's stored frame (origin, placements, features) to its new id."""
     for old_id, origin in list(origins.items()):
         if old_id == frame_id or origin.anchor != key or old_id in used_frame_ids:
             continue
@@ -202,10 +250,11 @@ def _migrate(
         if current is None or current.anchor != key:
             origins[frame_id] = origin
         del origins[old_id]
-        moved = placements.pop(old_id, None)
-        if moved:
-            # Placements already under the new id win.
-            placements[frame_id] = {**moved, **placements.get(frame_id, {})}
+        for store in (placements, features):
+            moved = store.pop(old_id, None)
+            if moved:
+                # What's already under the new id wins.
+                store[frame_id] = {**moved, **store.get(frame_id, {})}  # type: ignore[dict-item]
 
 
 def _build_frame(

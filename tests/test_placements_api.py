@@ -207,7 +207,9 @@ async def test_service_descriptions_load(hass: HomeAssistant, ready: Any) -> Non
     from homeassistant.helpers.translation import async_get_translations
 
     descriptions = (await async_get_all_descriptions(hass))[DOMAIN]
-    assert set(descriptions) == {"set_area", "clear_area", "get_map", "transform_point", "locate_point"}
+    assert set(descriptions) == {
+        "set_area", "clear_area", "get_map", "transform_point", "locate_point", "set_feature", "remove_feature"
+    }
     names = await async_get_translations(hass, "en", "services", [DOMAIN])
     assert names[f"component.{DOMAIN}.services.set_area.name"] == "Set area shape"
     assert names[f"component.{DOMAIN}.services.clear_area.fields.area_id.name"] == "Area"

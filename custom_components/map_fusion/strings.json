@@ -202,6 +202,50 @@
           "description": "traced: what the vacuum mapped. filled: furniture gaps filled in."
         }
       }
+    },
+    "set_feature": {
+      "name": "Set door or window",
+      "description": "Add a door or window to the map (a line along a wall), or change one with feature_id. Optionally link it to its door/window sensor or cover.",
+      "fields": {
+        "kind": {
+          "name": "Kind",
+          "description": "door or window."
+        },
+        "points": {
+          "name": "Ends",
+          "description": "The two ends of the opening, [[x, y], [x, y]] in map metres."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Optional, e.g. Front door."
+        },
+        "entity_id": {
+          "name": "Entity",
+          "description": "The sensor or cover that says whether it's open."
+        },
+        "areas": {
+          "name": "Areas",
+          "description": "The areas it joins. Leave out to work it out from the map."
+        },
+        "frame_id": {
+          "name": "Map",
+          "description": "Frame id. Optional when there is only one map."
+        },
+        "feature_id": {
+          "name": "Feature id",
+          "description": "To change an existing door or window."
+        }
+      }
+    },
+    "remove_feature": {
+      "name": "Remove door or window",
+      "description": "Remove a door or window from the map.",
+      "fields": {
+        "feature_id": {
+          "name": "Feature id",
+          "description": "From map_fusion/get (frames[].features[].feature_id)."
+        }
+      }
     }
   },
   "selector": {
@@ -215,6 +259,12 @@
       "options": {
         "traced": "As traced",
         "filled": "Furniture filled"
+      }
+    },
+    "feature_kind": {
+      "options": {
+        "door": "Door",
+        "window": "Window"
       }
     }
   }

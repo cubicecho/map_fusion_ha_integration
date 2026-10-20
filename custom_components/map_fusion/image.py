@@ -9,11 +9,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.image import ImageEntity
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import Event, EventStateChangedData, HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
 from .const import SCHEMA_VERSION
+from .features import open_state
 from .model import FusedFrame, FusedMap
 from .render import RenderedFrame, attributes, render
 
@@ -67,7 +69,53 @@ class FrameImage(ImageEntity):
         self._frame: FusedFrame | None = None
         self._rendered: RenderedFrame | None = None
         self._signature: Any = None
+        self._states: dict[str, str] = {}
+        self._unsub_states: Any = None
         self._update(frame)
+
+    async def async_added_to_hass(self) -> None:
+        self._track_feature_entities()
+        self._redraw()  # states weren't available before the entity was added
+
+    async def async_will_remove_from_hass(self) -> None:
+        if self._unsub_states:
+            self._unsub_states()
+            self._unsub_states = None
+
+    def _track_feature_entities(self) -> None:
+        """Redraw when a linked door/window sensor opens or closes."""
+        if self._unsub_states:
+            self._unsub_states()
+            self._unsub_states = None
+        entity_ids = sorted({f.entity_id for f in (self._frame.features if self._frame else []) if f.entity_id})
+        if self.hass is not None and entity_ids:
+            self._unsub_states = async_track_state_change_event(self.hass, entity_ids, self._on_feature_state)
+
+    @callback
+    def _on_feature_state(self, _event: Event[EventStateChangedData]) -> None:
+        if self._redraw():
+            self.async_write_ha_state()
+
+    def _feature_states(self) -> dict[str, str]:
+        if self._frame is None or self.hass is None:
+            return {}
+        out: dict[str, str] = {}
+        for f in self._frame.features:
+            state = self.hass.states.get(f.entity_id) if f.entity_id else None
+            out[f.feature_id] = open_state(f.entity_id, state.state if state else None)
+        return out
+
+    def _redraw(self) -> bool:
+        """Re-render for new door/window states. True if the picture changed."""
+        if self._frame is None:
+            return False
+        states = self._feature_states()
+        if states == self._states and self._rendered is not None:
+            return False
+        self._states = states
+        self._rendered = render(self._frame, filled=self._filled, states=states)
+        self._attr_image_last_updated = dt_util.utcnow()
+        return True
 
     @property
     def available(self) -> bool:
@@ -87,6 +135,7 @@ class FrameImage(ImageEntity):
     @callback
     def set_frame(self, frame: FusedFrame | None) -> None:
         if self._update(frame) and self.hass is not None and self.entity_id:
+            self._track_feature_entities()
             self.async_write_ha_state()
 
     def _update(self, frame: FusedFrame | None) -> bool:
@@ -97,6 +146,7 @@ class FrameImage(ImageEntity):
         self._signature = signature
         self._frame = frame
         if frame is not None:
-            self._rendered = render(frame, filled=self._filled)
+            self._states = self._feature_states()
+            self._rendered = render(frame, filled=self._filled, states=self._states)
             self._attr_image_last_updated = dt_util.utcnow()
         return True
