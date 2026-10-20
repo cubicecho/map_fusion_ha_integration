@@ -6,8 +6,8 @@ Map Fusion is a Home Assistant integration that combines the maps from your robo
 
 ## Planned features
 
-- Read room maps from Dreame, Xiaomi / Roborock and Valetudo vacuums
-- Align several vacuums' maps on the same floor into one coordinate frame
+- Read room maps from Dreame and Valetudo vacuums (Xiaomi / Roborock planned)
+- Line up several vacuums' maps on the same floor into one map
 - Link rooms to Home Assistant areas, reusing the vacuum area mapping Home Assistant already has (2026.3+)
 - Serve the fused map to cards and integrations through a websocket API, a service and an image entity
 

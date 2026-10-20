@@ -206,7 +206,15 @@ These changes live in the presence-map-card repo. This repo only provides the AP
    - `locate_point` also takes a vacuum's native coordinates (`source_id`), so "which room is the robot in" is one call.
    - Image entities are keyed by frame id. A frame that moves to a floor gets a new entity, and the old one goes unavailable (remove it from the entity settings).
    - Real D10 Plus check: the image matches the vacuum map, and the charger position (vacuum mm) lands inside the Office.
-5. **Second source + alignment.** Valetudo first (same parser), then the Xiaomi extractor (bbox only). Fit from shared-area centroids (2+ shared areas → similarity transform; 3+ → least squares with `residual_m`; try mirrored). Merge with `confidence`.
+5. **Second source + alignment** ✅ (2026-10-20, Valetudo; Xiaomi still to do). `sources/base.py` (adapter contract), `sources/valetudo.py`, `align.py`, merge groups (one anchor + aligned maps per frame). 118 tests. Differences from the plan:
+   - Rigid fit (rotation + shift), not similarity: every adapter already gives metres, so scale is fixed at 1. 2 shared areas give an exact fit; 3+ a least-squares fit, where a mirrored fit is also tried and only wins when clearly better. Residual over 0.75 m → no alignment.
+   - The anchor is the map that anchored the frame before (from stored origins), else the one with the most linked areas. So adding a vacuum never moves an existing frame.
+   - Shared areas keep the anchor's shape; the other map adds `sources` entries and `confidence` (IoU of the two shapes). Areas only the aligned map has are added from it.
+   - Floor-less maps are aligned too (the first user has no floors).
+   - Overlaps are now measured on the shapes (5 cm grid), not bounding boxes, and pairs from different vacuums are checked.
+   - Valetudo has no room boxes, so there's no bbox fallback; its map is re-read every 10 minutes because HA sees no state change when the map image updates.
+   - Not tested on a real Valetudo robot (only synthetic data). Entity unique ids were taken from Valetudo's source.
+   - Xiaomi Cloud Map Extractor (bbox only) moves to its own step.
 6. **Extras.** Walls/doors layer in the output, polygon point editing, a repair issue when a source's rooms change.
 
 ## Open questions

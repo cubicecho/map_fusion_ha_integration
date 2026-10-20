@@ -141,6 +141,9 @@ class FusedArea:
     origin: Literal["vacuum", "manual"]
     geometry: Geometry
     sources: list[dict[str, str]]
+    # How well two or more vacuums agree on this area's shape (0..1, IoU).
+    # None when only one vacuum sees it.
+    confidence: float | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -153,6 +156,7 @@ class FusedArea:
             "origin": self.origin,
             "geometry": self.geometry,
             "sources": self.sources,
+            "confidence": None if self.confidence is None else _r(self.confidence, 2),
         }
 
 

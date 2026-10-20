@@ -2,7 +2,7 @@
 
 A Home Assistant custom integration that reads the maps from robot vacuums (Dreame, Xiaomi/Roborock, Valetudo, …), puts them in one shared frame per HA floor (or per vacuum map when areas have no floor), and ties each room to an HA area. Other cards and integrations read the result, a **fused map**, instead of each one parsing vacuum maps itself.
 
-**Status: phase 4 done.** Dreame room polygons over websocket; user-placed areas (websocket, services, options flow); presence-map-card reads Map Fusion (phase 3, in that repo); read services `get_map`, `transform_point`, `locate_point` and a per-frame SVG image entity. Next: phase 5, a second source and alignment. See [`.agents/plan.md`](.agents/plan.md).
+**Status: phase 5 done.** Dreame and Valetudo sources; maps from two vacuums on one floor are lined up and merged; user-placed areas (websocket, services, options flow); presence-map-card reads Map Fusion (in that repo); read services `get_map`, `transform_point`, `locate_point` and a per-frame SVG image entity. Next: Xiaomi Cloud Map Extractor source, then phase 6 extras. See [`.agents/plan.md`](.agents/plan.md).
 
 ## Commands
 
@@ -40,9 +40,13 @@ custom_components/map_fusion/
   queries.py         # find frame, locate point, frame ↔ vacuum transforms, document (pure)
   render.py          # frame → SVG + calibration points (pure)
   image.py           # image platform: one SVG image entity per frame
+  align.py           # line a second vacuum's map up with the anchor (rigid fit on shared areas, pure)
   sources/
-    valetudo_map.py  # ValetudoMap PNG/JSON → room polygons (pure; Valetudo will reuse it)
+    __init__.py      # ADAPTERS: kind → adapter module
+    base.py          # adapter contract + SourceDevice
+    valetudo_map.py  # ValetudoMap PNG/JSON → room polygons (pure; shared by Dreame and Valetudo)
     dreame.py        # Tasshack dreame-vacuum: entity discovery, pixel rooms, bbox fallback
+    valetudo.py      # Valetudo via MQTT autodiscovery: Map data camera, polled every 10 min
 tests/
   synthetic.py       # made-up Dreame map (L room, room with hole, room with speck) for CI
   ha_env.py          # fake Dreame entities + Map Fusion setup for tests inside HA
@@ -60,7 +64,7 @@ tests/
 - **Frame origins are stored, not recomputed**, so hand-placed areas don't move when a vacuum re-maps. When a map changes frame id (its areas get a floor, or the user picks one), its origin and placements move with it (`merge._migrate`).
 - **`merge.build` stays pure:** it takes stored state (origins, placements, floor choices) and returns the updated state; the manager stores it.
 - **First source: Dreame** (Tasshack/dreame-vacuum). **First consumer: presence-map-card.**
-- **Source adapters own all vendor parsing.** The fusion code only sees the normalized `SourceMap` model.
+- **Source adapters own all vendor parsing.** The fusion code only sees the normalized `SourceMap` model: metres, y down, plus `to_native`. A new source is a module with the functions in `sources/base.py`, added to `ADAPTERS`.
 - **Big geometry never goes in entity state attributes** (recorder bloat, 16 KB limit). Serve it over websocket and service responses.
 
 ## Agent File Convention

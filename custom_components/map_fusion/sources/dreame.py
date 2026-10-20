@@ -26,11 +26,13 @@ from homeassistant.helpers import entity_registry as er
 
 from ..model import Rect, SourceMap, SourceRoom, Transform
 from . import valetudo_map
+from .base import SourceDevice
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORM = "dreame_vacuum"
 KIND = "dreame"
+POLL_INTERVAL = None  # the map camera's attributes change with the layout
 
 # Source frame (m, y down) → vacuum native (mm, y up).
 TO_NATIVE = Transform(a=1000.0, d=-1000.0)
@@ -47,7 +49,7 @@ class DreameEntities:
     map_data_disabled: bool
 
 
-def discover(hass: HomeAssistant) -> list[DreameEntities]:
+def discover(hass: HomeAssistant) -> list[SourceDevice]:
     """Find Dreame vacuums and their map cameras."""
     registry = er.async_get(hass)
     by_device: dict[str, list[er.RegistryEntry]] = {}
@@ -55,7 +57,7 @@ def discover(hass: HomeAssistant) -> list[DreameEntities]:
         if entry.platform == PLATFORM and entry.device_id:
             by_device.setdefault(entry.device_id, []).append(entry)
 
-    found: list[DreameEntities] = []
+    found: list[SourceDevice] = []
     for entries in by_device.values():
         vacuum = next((e for e in entries if e.domain == "vacuum"), None)
         if vacuum is None or vacuum.disabled_by is not None:
@@ -68,19 +70,27 @@ def discover(hass: HomeAssistant) -> list[DreameEntities]:
             None,
         )
         data_disabled = data_camera is not None and data_camera.disabled_by is not None
+        ents = DreameEntities(
+            vacuum=vacuum.entity_id,
+            map_camera=map_camera.entity_id if map_camera and not map_camera.disabled_by else None,
+            map_data_camera=None if data_camera is None or data_disabled else data_camera.entity_id,
+            map_data_disabled=data_camera is None or data_disabled,
+        )
         found.append(
-            DreameEntities(
-                vacuum=vacuum.entity_id,
-                map_camera=map_camera.entity_id if map_camera and not map_camera.disabled_by else None,
-                map_data_camera=None if data_camera is None or data_disabled else data_camera.entity_id,
-                map_data_disabled=data_camera is None or data_disabled,
+            SourceDevice(
+                kind=KIND,
+                vacuum=ents.vacuum,
+                tracked=[e for e in (ents.vacuum, ents.map_camera, ents.map_data_camera) if e],
+                map_data_disabled=ents.map_data_disabled,
+                extra=ents,
             )
         )
     return sorted(found, key=lambda d: d.vacuum)
 
 
-def map_signature(hass: HomeAssistant, ents: DreameEntities) -> tuple[Any, ...] | None:
+def map_signature(hass: HomeAssistant, device: SourceDevice) -> tuple[Any, ...] | None:
     """Changes when the room layout changes, not when the robot moves."""
+    ents: DreameEntities = device.extra
     state = hass.states.get(ents.map_camera) if ents.map_camera else None
     if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
         return None
@@ -99,8 +109,9 @@ def map_signature(hass: HomeAssistant, ents: DreameEntities) -> tuple[Any, ...] 
     )
 
 
-async def async_read(hass: HomeAssistant, ents: DreameEntities) -> SourceMap | None:
+async def async_read(hass: HomeAssistant, device: SourceDevice) -> SourceMap | None:
     """Read the current map. None when the map camera has nothing yet."""
+    ents: DreameEntities = device.extra
     state = hass.states.get(ents.map_camera) if ents.map_camera else None
     if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
         return None

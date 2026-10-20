@@ -87,8 +87,10 @@ def test_find_frame(fused: FusedMap) -> None:
     with pytest.raises(QueryError) as err:
         find_frame(fused, "nope")
     assert err.value.code == "not_found"
+    # One shared area isn't enough to line the maps up, so each gets a frame.
+    one = {"kitchen": ["1_1"]}
     two = build(
-        [SourceInput(source("vacuum.a"), MAPPING), SourceInput(source("vacuum.b"), MAPPING)], AREAS, {}, {}, NOW
+        [SourceInput(source("vacuum.a"), one), SourceInput(source("vacuum.b"), one)], AREAS, {}, {}, NOW
     ).fused
     with pytest.raises(QueryError) as err:
         find_frame(two, None)

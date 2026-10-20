@@ -63,3 +63,42 @@ async def setup_map_fusion(hass: HomeAssistant) -> MockConfigEntry:
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     return entry
+
+
+# Valetudo -----------------------------------------------------------------------
+
+VALETUDO_ID = "ShinyPracticalRobot"
+VALETUDO_VACUUM = "vacuum.valetudo_robot"
+VALETUDO_CAMERA = "camera.valetudo_robot_map_data"
+VALETUDO_SEGMENTS = "sensor.valetudo_robot_map_segments"
+PATCH_VALETUDO_IMAGE = "custom_components.map_fusion.sources.valetudo.async_get_image"
+
+
+async def add_valetudo(hass: HomeAssistant) -> None:
+    """Register a Valetudo robot the way its MQTT autodiscovery does."""
+    mqtt_entry = MockConfigEntry(domain="mqtt")
+    mqtt_entry.add_to_hass(hass)
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=mqtt_entry.entry_id, identifiers={("mqtt", VALETUDO_ID)}
+    )
+    reg = er.async_get(hass)
+    for domain, suffix, object_id in (
+        ("vacuum", "_vacuum", "valetudo_robot"),
+        ("camera", "_camera_MapData", "valetudo_robot_map_data"),
+        ("sensor", "_sensor_MapSegments", "valetudo_robot_map_segments"),
+    ):
+        reg.async_get_or_create(
+            domain,
+            "mqtt",
+            f"{VALETUDO_ID}{suffix}",
+            suggested_object_id=object_id,
+            config_entry=mqtt_entry,
+            device_id=device.id,
+        )
+    hass.states.async_set(VALETUDO_VACUUM, "docked", {"friendly_name": "Valetudo robot"})
+    hass.states.async_set(VALETUDO_CAMERA, "idle", {})
+    hass.states.async_set(VALETUDO_SEGMENTS, "3", {"1": "Kitchen", "2": "Office", "3": "Nook"})
+
+
+async def link_valetudo_areas(hass: HomeAssistant, mapping: dict[str, list[str]]) -> None:
+    er.async_get(hass).async_update_entity_options(VALETUDO_VACUUM, "vacuum", {"area_mapping": mapping})

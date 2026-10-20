@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
@@ -40,7 +40,8 @@ from .const import DOMAIN
 from .merge import AreaInfo, FrameOrigin, SourceInput, build
 from .model import FusedArea, FusedMap, Ring, SourceMap
 from .placements import Placements
-from .sources import dreame
+from .sources import ADAPTERS
+from .sources.base import SourceDevice
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -48,6 +49,7 @@ STORAGE_VERSION = 1
 STORAGE_KEY = DOMAIN
 REBUILD_COOLDOWN = 2.0  # seconds
 FULL_REFRESH_INTERVAL = timedelta(hours=6)
+POLL_TICK = timedelta(minutes=1)
 ISSUE_MAP_DATA_DISABLED = "map_data_disabled"
 
 Listener = Callable[[FusedMap], None]
@@ -74,9 +76,11 @@ class MapFusionManager:
         self._origins: dict[str, FrameOrigin] = {}
         self._placements: Placements = {}
         self._floor_choices: dict[str, str | None] = {}
-        self._devices: list[dreame.DreameEntities] = []
+        self._devices: list[SourceDevice] = []
+        self._poll_due: set[str] = set()  # vacuums to re-read on the next refresh
         self._maps: dict[str, SourceMap] = {}  # by vacuum entity id
         self._signatures: dict[str, Any] = {}
+        self._last_read: dict[str, datetime] = {}  # vacuum → when its map was last read
         self._listeners: list[Listener] = []
         self._unsubs: list[CALLBACK_TYPE] = []
         self._state_unsub: CALLBACK_TYPE | None = None
@@ -105,6 +109,7 @@ class MapFusionManager:
             self.hass.bus.async_listen(ar.EVENT_AREA_REGISTRY_UPDATED, self._on_layout_change),
             self.hass.bus.async_listen(fr.EVENT_FLOOR_REGISTRY_UPDATED, self._on_layout_change),
             async_track_time_interval(self.hass, self._on_interval, FULL_REFRESH_INTERVAL),
+            async_track_time_interval(self.hass, self._on_poll, POLL_TICK),
         ]
         if self.hass.state is CoreState.running:
             await self._async_refresh()
@@ -247,6 +252,19 @@ class MapFusionManager:
         self._debouncer.async_schedule_call()
 
     @callback
+    def _on_poll(self, now: datetime) -> None:
+        """Mark sources that need re-reading on a timer (see base.POLL_INTERVAL)."""
+        due = False
+        for device in self._devices:
+            interval = ADAPTERS[device.kind].POLL_INTERVAL
+            last = self._last_read.get(device.vacuum)
+            if interval is not None and (last is None or now - last >= interval):
+                self._poll_due.add(device.vacuum)
+                due = True
+        if due:
+            self._debouncer.async_schedule_call()
+
+    @callback
     def _on_layout_change(self, event: Event[Any]) -> None:
         if event.data.get("action") == "remove" and "area_id" in event.data:
             self._prune_area(event.data["area_id"])
@@ -278,13 +296,13 @@ class MapFusionManager:
 
     @callback
     def _rediscover(self) -> None:
-        devices = dreame.discover(self.hass)
+        devices = [d for adapter in ADAPTERS.values() for d in adapter.discover(self.hass)]
         if devices != self._devices:
             self._force_reread = True
         self._devices = devices
         if self._state_unsub:
             self._state_unsub()
-        tracked = [e for d in devices for e in (d.vacuum, d.map_camera, d.map_data_camera) if e]
+        tracked = [e for d in devices for e in d.tracked]
         self._state_unsub = async_track_state_change_event(self.hass, tracked, self._on_state)
         self._update_issues()
 
@@ -295,16 +313,22 @@ class MapFusionManager:
         self._force_reread = False
         live = {d.vacuum for d in self._devices}
         for gone in set(self._maps) - live:
+            self._last_read.pop(gone, None)
             del self._maps[gone]
             self._signatures.pop(gone, None)
 
         for device in self._devices:
-            signature = dreame.map_signature(self.hass, device)
+            adapter = ADAPTERS[device.kind]
+            signature = adapter.map_signature(self.hass, device)
             if signature is None:
                 continue
-            if not force and device.vacuum in self._maps and self._signatures.get(device.vacuum) == signature:
+            due = device.vacuum in self._poll_due
+            self._poll_due.discard(device.vacuum)
+            unchanged = device.vacuum in self._maps and self._signatures.get(device.vacuum) == signature
+            if not force and not due and unchanged:
                 continue
-            smap = await dreame.async_read(self.hass, device)
+            self._last_read[device.vacuum] = dt_util.utcnow()
+            smap = await adapter.async_read(self.hass, device)
             if smap is not None:
                 self._maps[device.vacuum] = smap
                 self._signatures[device.vacuum] = signature

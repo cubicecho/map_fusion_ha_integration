@@ -39,7 +39,9 @@ What cards and integrations get from Map Fusion. Everything here is a proposal. 
           "geometry": "pixels",            // pixels | bbox | manual
           "sources": [
             { "source_id": "vacuum.downstairs", "map_id": "46", "segment_id": "1_2" }
-          ]
+          ],
+          // 0..1: how well two or more vacuums agree on the shape (IoU). null with one vacuum.
+          "confidence": null
         },
         {
           "area_id": "hallway",
@@ -59,7 +61,8 @@ What cards and integrations get from Map Fusion. Everything here is a proposal. 
           "polygons": [[[8.0, 5.0], [10.0, 5.0], [10.0, 7.0], [8.0, 7.0]]],
           "rect": { "x": 8.0, "y": 5.0, "width": 2.0, "height": 2.0 } }
       ],
-      // Only for bbox/manual geometry, which can overlap. Empty when all areas are traced from pixels.
+      // Areas whose shapes overlap (measured on a 5 cm grid). Outlines traced by one vacuum never
+      // overlap; boxes, manual shapes and shapes from different vacuums can.
       "overlaps": [],
       "sources": [
         {
@@ -67,11 +70,12 @@ What cards and integrations get from Map Fusion. Everything here is a proposal. 
           "kind": "dreame",
           "map_id": "46",
           "map_name": "Map 1",
-          "role": "anchor",                 // anchor | aligned
+          "role": "anchor",                 // anchor | aligned (lined up with the anchor)
+          // aligned only: "shared_areas": ["kitchen", "office"] (the areas the fit used)
           // source native coords (Dreame: vacuum mm, y up) → floor metres: [a, b, c, d, tx, ty]
           // x' = a*x + b*y + tx ; y' = c*x + d*y + ty
           "transform": [0.001, 0, 0, -0.001, 10.8, 3.75],
-          "residual_m": 0.0,                // RMS error of the native↔frame fit (Dreame: pixel vs box fit)
+          "residual_m": 0.0,                // anchor: native↔frame fit error (Dreame: pixel vs box fit); aligned: how far shared area centres are off after lining up
           "warnings": []                    // e.g. "Map data camera is disabled, using room boxes"
         }
       ]

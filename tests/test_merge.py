@@ -104,7 +104,7 @@ def test_origin_resets_when_the_anchor_changes() -> None:
 def test_bbox_areas_report_overlaps_and_transform() -> None:
     smap = source(bbox=True)
     # Make two boxes overlap.
-    smap.rooms["1_2"].rect = smap.rooms["1_2"].rect.shifted(-0.5, 0)
+    smap.rooms["1_2"] = dreame._shifted(smap.rooms["1_2"], -0.5, 0)
     result = build([SourceInput(smap, MAPPING)], AREAS, {}, {}, NOW)
     frame = result.fused.frames[0]
     assert frame.areas[0].geometry == "bbox"

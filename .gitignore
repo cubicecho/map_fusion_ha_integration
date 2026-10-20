@@ -20,3 +20,4 @@ tests/fixtures/*map_data*
 tests/fixtures/camera.json
 tests/fixtures/dreame_d10_plus_camera.json
 tests/fixtures/dreame_d10_plus_vacuum.json
+.venv-tmp/

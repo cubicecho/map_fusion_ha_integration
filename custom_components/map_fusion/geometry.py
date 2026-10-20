@@ -229,3 +229,74 @@ def _dist_to_segment(p: Point, a: Point, b: Point) -> float:
         return _dist2(p, a) ** 0.5
     t = max(0.0, min(1.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / length2))
     return _dist2(p, (a[0] + t * dx, a[1] + t * dy)) ** 0.5
+
+
+def centroid(rings: list[Ring]) -> Point:
+    """Area-weighted centre of several rings."""
+    total = cx = cy = 0.0
+    for ring in rings:
+        a = signed_area(ring)
+        if a == 0:
+            continue
+        rx = ry = 0.0
+        for i in range(len(ring)):
+            x0, y0 = ring[i - 1]
+            x1, y1 = ring[i]
+            cross = x0 * y1 - x1 * y0
+            rx += (x0 + x1) * cross
+            ry += (y0 + y1) * cross
+        cx += rx / 6
+        cy += ry / 6
+        total += a
+    if total == 0:
+        pts = [p for r in rings for p in r]
+        return (sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts))
+    return (cx / total, cy / total)
+
+
+def raster(rings: list[Ring], cell: float, x0: float, y0: float, nx: int, ny: int) -> set[Cell]:
+    """Grid cells whose centres are inside any ring (scanline fill)."""
+    out: set[Cell] = set()
+    for j in range(ny):
+        y = y0 + (j + 0.5) * cell
+        for ring in rings:
+            xs: list[float] = []
+            for i in range(len(ring)):
+                (ax, ay), (bx, by) = ring[i - 1], ring[i]
+                if (ay > y) != (by > y):
+                    xs.append(ax + (y - ay) * (bx - ax) / (by - ay))
+            xs.sort()
+            for a, b in zip(xs[::2], xs[1::2], strict=False):
+                first = max(0, math.ceil((a - x0) / cell - 0.5))
+                last = min(nx - 1, math.floor((b - x0) / cell - 0.5))
+                for i in range(first, last + 1):
+                    out.add((i, j))
+    return out
+
+
+def overlap(
+    a: list[Ring], b: list[Ring], cell: float = 0.05, box: Rect | None = None
+) -> tuple[float, float, float]:
+    """(area of a, area of b, area of both) in m², measured on a grid.
+
+    With `box`, only that part of the plane is measured (cheaper when only
+    the shared part matters).
+    """
+    if box is None:
+        pts = [p for r in a + b for p in r]
+        if not pts:
+            return (0.0, 0.0, 0.0)
+        box = bounds(pts)
+    nx = max(1, math.ceil(box.width / cell))
+    ny = max(1, math.ceil(box.height / cell))
+    ca = raster(a, cell, box.x, box.y, nx, ny)
+    cb = raster(b, cell, box.x, box.y, nx, ny)
+    m2 = cell * cell
+    return (len(ca) * m2, len(cb) * m2, len(ca & cb) * m2)
+
+
+def iou(a: list[Ring], b: list[Ring], cell: float = 0.05) -> float:
+    """Intersection over union of two shapes: 1 = identical, 0 = apart."""
+    area_a, area_b, both = overlap(a, b, cell)
+    union = area_a + area_b - both
+    return both / union if union else 0.0
