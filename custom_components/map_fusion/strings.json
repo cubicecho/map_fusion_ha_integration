@@ -1,0 +1,19 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Map Fusion",
+        "description": "Map Fusion combines your robot vacuum maps into one floor map tied to your Home Assistant areas."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Map Fusion is already set up."
+    }
+  },
+  "issues": {
+    "map_data_disabled": {
+      "title": "Turn on the Dreame Map data camera for exact room shapes",
+      "description": "Map Fusion is using room boxes for {vacuum}, so rooms can overlap. In Settings → Entities, show disabled entities, find this vacuum's \"Map data\" camera and enable it. Map Fusion then traces the real room outlines."
+    }
+  }
+}

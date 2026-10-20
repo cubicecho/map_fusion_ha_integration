@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+.env
+*.swp
+.pytest_cache/
+.coverage
+htmlcov/
+
+.ruff_cache/
+.mypy_cache/
+
+# Real map data from the user's vacuum. Keep local, never commit.
+tests/fixtures/*map_data*
+tests/fixtures/camera.json
+tests/fixtures/dreame_d10_plus_camera.json
+tests/fixtures/dreame_d10_plus_vacuum.json

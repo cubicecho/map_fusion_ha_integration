@@ -1,0 +1,18 @@
+{
+  "domain": "map_fusion",
+  "name": "Map Fusion",
+  "codeowners": [
+    "@vantreeseba"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "camera",
+    "vacuum"
+  ],
+  "documentation": "https://github.com/cubicecho/map_fusion_ha_integration",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "0.0.1"
+}
