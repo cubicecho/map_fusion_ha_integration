@@ -187,7 +187,15 @@ These changes live in the presence-map-card repo. This repo only provides the AP
    - Map images are re-read only when the room layout changes (`saved_map_id`, `map_index`, room boxes), on startup, when entities change, and every 6 h. Robot moves cost only a cheap signature check.
    - Real Dreame result: all 5 rooms traced, 14–77 points, no overlaps, pixel↔box fit residual ~0.
    - HA 2026.10 validates websocket schemas with `probatio`; 2026.3 has `voluptuous`. `websocket.py` imports whichever exists.
-2. **User placements.** Extend the store in `coordinator.py` (or split out `store.py`), WS `map_fusion/area/set|clear`, services, options flow (placements + map→floor choice), `unplaced_areas`.
+2. **User placements** ✅ (2026-10-20). `placements.py` (validate and tidy rings), placements and map → floor choices stored next to the frame origins, WS `map_fusion/area/set|clear` (admin), services `map_fusion.set_area|clear_area`, options flow (place a rectangle, remove a placement, choose a map's floor). 87 tests. Differences from the plan:
+   - No `store.py`: the store stays in `coordinator.py` (one `Store`, keys `frames`, `placements`, `floor_choices`).
+   - `frame_id` is optional on set/clear. Without it: the area's floor if it has one, else the only frame. Errors: `invalid_format`, `not_found`, `frame_required`, `floor_mismatch`.
+   - A placement can go in any built frame or any HA floor. A floor with placements but no vacuum becomes a placements-only frame (origin 0, 0).
+   - Placements in a frame whose vacuum is missing right now are kept but not shown, so a vacuum that's offline at startup doesn't lose them.
+   - When a frame id changes (floor assigned or chosen), its origin and placements move to the new id.
+   - Deleting an HA area deletes its placements.
+   - Overlaps between a manual shape and other areas are checked on bounding boxes, not polygons (good enough to flag; exact polygon clipping later if needed).
+   - The options flow only does rectangles. Polygons go through the websocket or the service.
 3. **presence-map-card reads Map Fusion** (in that repo).
 4. **More outputs.** `map_fusion.get_map`, `transform_point` and `locate_point` services, plus a per-frame `image` entity with `calibration_points`.
 5. **Second source + alignment.** Valetudo first (same parser), then the Xiaomi extractor (bbox only). Fit from shared-area centroids (2+ shared areas → similarity transform; 3+ → least squares with `residual_m`; try mirrored). Merge with `confidence`.

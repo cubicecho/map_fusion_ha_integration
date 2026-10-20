@@ -2,7 +2,7 @@
 
 A Home Assistant custom integration that reads the maps from robot vacuums (Dreame, Xiaomi/Roborock, Valetudo, …), puts them in one shared frame per HA floor (or per vacuum map when areas have no floor), and ties each room to an HA area. Other cards and integrations read the result, a **fused map**, instead of each one parsing vacuum maps itself.
 
-**Status: phase 1 done** (Dreame room polygons, read-only, over websocket). Next: phase 2, user-placed areas. See [`.agents/plan.md`](.agents/plan.md).
+**Status: phase 2 done** (Dreame room polygons over websocket, plus user-placed areas through websocket, services and the options flow). Next: phase 3, presence-map-card reads Map Fusion (in that repo). See [`.agents/plan.md`](.agents/plan.md).
 
 ## Commands
 
@@ -27,19 +27,23 @@ ruff check custom_components/ tests/
 
 ```
 custom_components/map_fusion/
-  __init__.py        # setup: one MapFusionManager per entry, websocket registered in async_setup
-  config_flow.py     # single entry, no fields
+  __init__.py        # setup: one MapFusionManager per entry; websocket + services registered in async_setup
+  config_flow.py     # single entry, no fields; options flow: place/clear areas, map → floor
   const.py           # DOMAIN, SCHEMA_VERSION
   model.py           # Rect, Transform, SourceMap/SourceRoom, FusedMap/Frame/Area (pure)
   geometry.py        # cells → rings → simplified polygons, point-in-polygon (pure)
-  merge.py           # sources + area links + stored origins → FusedMap (pure)
-  coordinator.py     # MapFusionManager: discovery, events, re-read rules, store, subscribers, repairs
-  websocket.py       # map_fusion/get, map_fusion/subscribe
+  placements.py      # user shapes: validate, tidy, label point (pure)
+  merge.py           # sources + area links + origins + placements → FusedMap (pure)
+  coordinator.py     # MapFusionManager: discovery, events, re-read rules, store, subscribers, repairs, placement API
+  websocket.py       # map_fusion/get, /subscribe; admin: /area/set, /area/clear
+  services.py        # map_fusion.set_area, map_fusion.clear_area (services.yaml)
   sources/
     valetudo_map.py  # ValetudoMap PNG/JSON → room polygons (pure; Valetudo will reuse it)
     dreame.py        # Tasshack dreame-vacuum: entity discovery, pixel rooms, bbox fallback
 tests/
   synthetic.py       # made-up Dreame map (L room, room with hole, room with speck) for CI
+  ha_env.py          # fake Dreame entities + Map Fusion setup for tests inside HA
+  conftest.py        # fixtures: areas, image_mock, ready (Map Fusion running on the fake vacuum)
   fixtures/          # real D10 Plus data: git-ignored, tests skip without it
 ```
 
@@ -50,7 +54,8 @@ tests/
 - **Areas come from HA.** Read the core vacuum segment → area mapping (HA 2026.3+, `registry_entry.options["vacuum"]["area_mapping"]`). Don't ask users to map rooms a second time.
 - **Polygons, with a bounding `rect` alongside.** Dreame room polygons are traced from the `map_data` camera's ValetudoMap pixels (no extra dependencies). `rect` (same fields as presence-map-card) is always included for rectangle-only consumers. When `map_data` is disabled, fall back to the `rooms` bounding boxes.
 - **Map Fusion owns area geometry.** Users can place areas no vacuum covers (or override one). Placements live in `.storage/map_fusion`, keyed by frame + area, in that frame's coordinates.
-- **Frame origins are stored, not recomputed**, so hand-placed areas don't move when a vacuum re-maps.
+- **Frame origins are stored, not recomputed**, so hand-placed areas don't move when a vacuum re-maps. When a map changes frame id (its areas get a floor, or the user picks one), its origin and placements move with it (`merge._migrate`).
+- **`merge.build` stays pure:** it takes stored state (origins, placements, floor choices) and returns the updated state; the manager stores it.
 - **First source: Dreame** (Tasshack/dreame-vacuum). **First consumer: presence-map-card.**
 - **Source adapters own all vendor parsing.** The fusion code only sees the normalized `SourceMap` model.
 - **Big geometry never goes in entity state attributes** (recorder bloat, 16 KB limit). Serve it over websocket and service responses.

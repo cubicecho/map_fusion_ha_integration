@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pytest
 
+from custom_components.map_fusion import placements as pl
 from custom_components.map_fusion.merge import AreaInfo, FrameOrigin, SourceInput, build
 from custom_components.map_fusion.model import SourceMap
 from custom_components.map_fusion.sources import dreame
@@ -119,3 +120,109 @@ def test_document_is_json_ready() -> None:
     area = doc["frames"][0]["areas"][0]
     assert set(area) >= {"area_id", "name", "polygons", "rect", "label_point", "geometry", "sources"}
     assert isinstance(area["polygons"][0][0], list)
+
+
+# User placements -----------------------------------------------------------
+
+GARAGE = [pl.rect_ring(20, 0, 3, 6)]
+
+
+def test_placement_adds_an_area_to_the_vacuum_frame() -> None:
+    result = build(
+        [SourceInput(source(), MAPPING)], AREAS, {}, {}, NOW, placements={"vacuum.d10:46": {"garage": GARAGE}}
+    )
+    frame = result.fused.frames[0]
+    garage = next(a for a in frame.areas if a.area_id == "garage")
+    assert (garage.origin, garage.geometry, garage.sources) == ("manual", "manual", [])
+    assert garage.rect.as_dict() == {"x": 20, "y": 0, "width": 3, "height": 6}
+    assert garage.area_m2 == pytest.approx(18)
+    assert result.fused.unplaced_areas == []
+    assert frame.bounds is not None and frame.bounds.x + frame.bounds.width == pytest.approx(23)
+
+
+def test_placement_replaces_the_vacuum_shape() -> None:
+    kitchen = [pl.rect_ring(0, 0, 1, 1)]
+    result = build(
+        [SourceInput(source(), MAPPING)], AREAS, {}, {}, NOW, placements={"vacuum.d10:46": {"kitchen": kitchen}}
+    )
+    frame = result.fused.frames[0]
+    (area,) = [a for a in frame.areas if a.area_id == "kitchen"]
+    assert area.origin == "manual"
+    assert area.polygons == kitchen
+    # The room is still linked, so it isn't listed as unmapped.
+    assert frame.unmapped_rooms == []
+
+
+def test_manual_and_vacuum_boxes_can_overlap() -> None:
+    over = [pl.rect_ring(0, 0, 50, 50)]
+    result = build(
+        [SourceInput(source(), MAPPING)], AREAS, {}, {}, NOW, placements={"vacuum.d10:46": {"garage": over}}
+    )
+    pairs = {(o["a"], o["b"]) for o in result.fused.frames[0].overlaps}
+    assert pairs == {("garage", "kitchen"), ("garage", "office")}
+
+
+def test_floor_with_only_placements_gets_a_frame() -> None:
+    areas = {**AREAS, "attic": AreaInfo("attic", "Attic", "upstairs")}
+    result = build(
+        [SourceInput(source(), MAPPING)],
+        areas,
+        {"upstairs": "Upstairs"},
+        {},
+        NOW,
+        placements={"upstairs": {"attic": GARAGE}},
+    )
+    ids = [f.frame_id for f in result.fused.frames]
+    assert ids == ["vacuum.d10:46", "upstairs"]
+    upstairs = result.fused.frames[1]
+    assert (upstairs.floor_id, upstairs.name, upstairs.sources) == ("upstairs", "Upstairs", [])
+    assert "upstairs" not in result.origins  # placements-only frames have a fixed (0, 0)
+
+
+def test_placements_for_a_missing_vacuum_are_kept_but_hidden() -> None:
+    stored = {"vacuum.gone:1": {"garage": GARAGE}}
+    result = build([], AREAS, {}, {}, NOW, placements=stored)
+    assert result.fused.frames == []
+    assert result.placements == stored
+    assert "garage" in {a["area_id"] for a in result.fused.unplaced_areas}
+
+
+def test_placements_of_deleted_areas_are_skipped() -> None:
+    result = build(
+        [SourceInput(source(), MAPPING)], AREAS, {}, {}, NOW, placements={"vacuum.d10:46": {"gone": GARAGE}}
+    )
+    assert "gone" not in {a.area_id for a in result.fused.frames[0].areas}
+
+
+def test_frame_moves_to_floor_with_its_origin_and_placements() -> None:
+    first = build(
+        [SourceInput(source(), MAPPING)], AREAS, {}, {}, NOW, placements={"vacuum.d10:46": {"garage": GARAGE}}
+    )
+    on_floor = {k: AreaInfo(a.area_id, a.name, "ground") for k, a in AREAS.items()}
+    second = build(
+        [SourceInput(source(), MAPPING)],
+        on_floor,
+        {"ground": "Ground"},
+        first.origins,
+        NOW,
+        placements=first.placements,
+    )
+    (frame,) = second.fused.frames
+    assert frame.frame_id == "ground"
+    assert second.origins == {"ground": first.origins["vacuum.d10:46"]}
+    assert second.placements == {"ground": {"garage": GARAGE}}
+    assert [a.rect for a in frame.areas] == [a.rect for a in first.fused.frames[0].areas]
+
+
+def test_floor_choice_pins_a_map() -> None:
+    floors = {"ground": "Ground", "upstairs": "Upstairs"}
+    on_ground = {k: AreaInfo(a.area_id, a.name, "ground") for k, a in AREAS.items()}
+    src = [SourceInput(source(), MAPPING)]
+    pinned = build(src, AREAS, floors, {}, NOW, floor_choices={"vacuum.d10:46": "upstairs"})
+    assert pinned.fused.frames[0].frame_id == "upstairs"
+    none = build(src, on_ground, floors, {}, NOW, floor_choices={"vacuum.d10:46": None})
+    assert none.fused.frames[0].frame_id == "vacuum.d10:46"
+    assert none.fused.frames[0].floor_id is None
+    # A chosen floor that was deleted falls back to the vote.
+    deleted = build(src, on_ground, floors, {}, NOW, floor_choices={"vacuum.d10:46": "attic"})
+    assert deleted.fused.frames[0].frame_id == "ground"

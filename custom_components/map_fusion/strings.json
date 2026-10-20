@@ -15,5 +15,110 @@
       "title": "Turn on the Dreame Map data camera for exact room shapes",
       "description": "Map Fusion is using room boxes for {vacuum}, so rooms can overlap. In Settings → Entities, show disabled entities, find this vacuum's \"Map data\" camera and enable it. Map Fusion then traces the real room outlines."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Map Fusion",
+        "menu_options": {
+          "place_area": "Place an area on the map",
+          "clear_area": "Remove a placed area",
+          "map_floor": "Choose a vacuum map's floor"
+        }
+      },
+      "place_area": {
+        "title": "Place an area",
+        "description": "Pick the area to place. Use this for areas no vacuum room covers, or to replace a vacuum room's shape.",
+        "data": {
+          "area_id": "Area",
+          "frame_id": "Map"
+        }
+      },
+      "place_rect": {
+        "title": "Area rectangle",
+        "description": "Position and size in metres on {frame}. x goes right and y goes down from the map's top-left corner.",
+        "data": {
+          "x": "x",
+          "y": "y",
+          "width": "Width",
+          "height": "Height"
+        }
+      },
+      "clear_area": {
+        "title": "Remove a placed area",
+        "description": "The area goes back to its vacuum room, if it has one. Otherwise it becomes unplaced.",
+        "data": {
+          "placement": "Placed area"
+        }
+      },
+      "map_floor": {
+        "title": "Vacuum map floor",
+        "description": "By default a map goes on the floor most of its areas are on, or gets its own map when they have no floor.",
+        "data": {
+          "map": "Vacuum map",
+          "floor": "Floor"
+        }
+      }
+    },
+    "error": {
+      "invalid_placement": "Can't place it: {error}"
+    },
+    "abort": {
+      "not_loaded": "Map Fusion isn't running. Reload the integration and try again.",
+      "no_frames": "There's no map to place areas on yet. Link a vacuum's rooms to areas, or create a floor.",
+      "no_placements": "No areas have been placed by hand.",
+      "no_maps": "No vacuum maps found yet.",
+      "floor_missing": "That floor no longer exists."
+    }
+  },
+  "services": {
+    "set_area": {
+      "name": "Set area shape",
+      "description": "Place an area on a map by hand, as a rectangle (x, y, width, height) or as polygons. Replaces any vacuum room shape for that area.",
+      "fields": {
+        "area_id": {
+          "name": "Area",
+          "description": "The area to place."
+        },
+        "frame_id": {
+          "name": "Map",
+          "description": "Frame id from map_fusion/get. Optional when there is only one map, or the area's floor has one."
+        },
+        "x": {
+          "name": "x",
+          "description": "Left edge in metres."
+        },
+        "y": {
+          "name": "y",
+          "description": "Top edge in metres (y goes down)."
+        },
+        "width": {
+          "name": "Width",
+          "description": "Width in metres."
+        },
+        "height": {
+          "name": "Height",
+          "description": "Height in metres."
+        },
+        "polygons": {
+          "name": "Polygons",
+          "description": "Instead of a rectangle: a list of rings, each a list of [x, y] points in metres."
+        }
+      }
+    },
+    "clear_area": {
+      "name": "Clear area shape",
+      "description": "Remove an area's hand placement. It goes back to its vacuum room, if any.",
+      "fields": {
+        "area_id": {
+          "name": "Area",
+          "description": "The area to clear."
+        },
+        "frame_id": {
+          "name": "Map",
+          "description": "Frame id. Optional when the area is placed in only one map."
+        }
+      }
+    }
   }
 }

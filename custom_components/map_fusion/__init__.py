@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
-from . import websocket
+from . import services, websocket
 from .const import DOMAIN
 from .coordinator import MapFusionManager
 
@@ -19,8 +19,9 @@ type MapFusionConfigEntry = ConfigEntry[MapFusionManager]
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Register the websocket API once."""
+    """Register the websocket API and services once."""
     websocket.async_register(hass)
+    services.async_register(hass)
     return True
 
 

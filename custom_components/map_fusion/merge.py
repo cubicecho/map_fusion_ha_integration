@@ -12,6 +12,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import placements as pl
 from .const import SCHEMA_VERSION
 from .model import (
     FusedArea,
@@ -20,10 +21,12 @@ from .model import (
     Geometry,
     Point,
     Rect,
+    Ring,
     SourceMap,
     SourceRoom,
     Transform,
 )
+from .placements import Placements
 
 MIN_OVERLAP_M2 = 0.01
 
@@ -55,6 +58,8 @@ class BuildResult:
     fused: FusedMap
     # Origins to store: existing ones plus any new frames.
     origins: dict[str, FrameOrigin] = field(default_factory=dict)
+    # Placements to store (moved along when a frame id changed).
+    placements: Placements = field(default_factory=dict)
 
 
 def build(
@@ -63,32 +68,70 @@ def build(
     floor_names: dict[str, str],
     origins: dict[str, FrameOrigin],
     generated_at: str,
+    placements: Placements | None = None,
+    floor_choices: dict[str, str | None] | None = None,
 ) -> BuildResult:
-    new_origins = dict(origins)
-    frames: list[FusedFrame] = []
-    used_frame_ids: set[str] = set()
-    placed: set[str] = set()
+    """Build the fused map.
 
+    `placements` are the user's shapes by frame. `floor_choices` pins a
+    source map (by `SourceMap.key`) to a floor, or to no floor (None);
+    maps not listed pick their floor by majority vote.
+
+    When a map moves to another frame id (its areas got a floor, or a floor
+    choice changed), its stored origin and placements move with it. The
+    result carries the updated origins and placements for the caller to store.
+    """
+    new_origins = dict(origins)
+    new_placements: Placements = {f: dict(a) for f, a in (placements or {}).items()}
+    choices = floor_choices or {}
+
+    # 1. Which frame each source map goes in.
+    assigned: list[tuple[SourceInput, str, str | None]] = []
+    used_frame_ids: set[str] = set()
     for src in sorted(sources, key=lambda s: s.map.key):
-        smap = src.map
-        floor_id = _floor_for(src, areas)
-        frame_id = floor_id if floor_id and floor_id not in used_frame_ids else smap.key
+        key = src.map.key
+        chosen = choices.get(key, "")
+        if key in choices and (chosen is None or chosen in floor_names):
+            floor_id = chosen
+        else:  # no choice, or the chosen floor was deleted
+            floor_id = _floor_for(src, areas)
+        frame_id = floor_id if floor_id and floor_id not in used_frame_ids else key
         used_frame_ids.add(frame_id)
+        assigned.append((src, frame_id, floor_id))
+
+    # 2. Origins and placements follow their source to its frame id.
+    for src, frame_id, _floor in assigned:
+        _migrate(src.map.key, frame_id, used_frame_ids, new_origins, new_placements)
+
+    # 3. Frames.
+    frames: list[FusedFrame] = []
+    placed: set[str] = set()
+    for src, frame_id, floor_id in assigned:
+        smap = src.map
         name = (
             floor_names.get(floor_id, floor_id)
             if floor_id and frame_id == floor_id
             else smap.map_name or smap.key
         )
-
         stored = new_origins.get(frame_id)
         if stored is None or stored.anchor != smap.key:
             stored = FrameOrigin(anchor=smap.key, origin=_default_origin(smap))
             new_origins[frame_id] = stored
         ox, oy = stored.origin
-
-        frame = _build_frame(src, areas, frame_id, floor_id, name, -ox, -oy)
+        frame = _build_frame(
+            src, areas, frame_id, floor_id, name, -ox, -oy, new_placements.get(frame_id, {})
+        )
         placed.update(a.area_id for a in frame.areas)
         frames.append(frame)
+
+    # Floors with placements but no vacuum: a frame of placements only.
+    for frame_id in sorted(set(new_placements) - used_frame_ids):
+        if frame_id not in floor_names:
+            continue  # its vacuum is missing right now; keep the placements
+        frame = _manual_frame(frame_id, floor_names[frame_id], areas, new_placements[frame_id])
+        if frame.areas:
+            placed.update(a.area_id for a in frame.areas)
+            frames.append(frame)
 
     unplaced = [
         {"area_id": a.area_id, "name": a.name, "floor_id": a.floor_id}
@@ -98,7 +141,28 @@ def build(
     fused = FusedMap(
         version=SCHEMA_VERSION, generated_at=generated_at, frames=frames, unplaced_areas=unplaced
     )
-    return BuildResult(fused=fused, origins=new_origins)
+    return BuildResult(fused=fused, origins=new_origins, placements=new_placements)
+
+
+def _migrate(
+    key: str,
+    frame_id: str,
+    used_frame_ids: set[str],
+    origins: dict[str, FrameOrigin],
+    placements: Placements,
+) -> None:
+    """Move a source's stored frame (origin + placements) to its new id."""
+    for old_id, origin in list(origins.items()):
+        if old_id == frame_id or origin.anchor != key or old_id in used_frame_ids:
+            continue
+        current = origins.get(frame_id)
+        if current is None or current.anchor != key:
+            origins[frame_id] = origin
+        del origins[old_id]
+        moved = placements.pop(old_id, None)
+        if moved:
+            # Placements already under the new id win.
+            placements[frame_id] = {**moved, **placements.get(frame_id, {})}
 
 
 def _build_frame(
@@ -109,17 +173,21 @@ def _build_frame(
     name: str,
     dx: float,
     dy: float,
+    manual: dict[str, list[Ring]],
 ) -> FusedFrame:
     smap = src.map
-    fused_areas: list[FusedArea] = []
+    by_area: dict[str, FusedArea] = {}
     linked: set[str] = set()
-    for area_id, segment_ids in sorted(src.area_mapping.items()):
+    for area_id, segment_ids in src.area_mapping.items():
         info = areas.get(area_id)
         rooms = [smap.rooms[s] for s in segment_ids if s in smap.rooms]
         if info is None or not rooms:
             continue
         linked.update(r.segment_id for r in rooms)
-        fused_areas.append(_area(info, rooms, smap, dx, dy))
+        by_area[area_id] = _area(info, rooms, smap, dx, dy)
+    # A user placement replaces the vacuum's shape for that area.
+    by_area.update(_manual_areas(areas, manual))
+    fused_areas = [by_area[k] for k in sorted(by_area)]
 
     unmapped = [
         {
@@ -159,6 +227,44 @@ def _build_frame(
             }
         ],
     )
+
+
+def _manual_frame(
+    frame_id: str, name: str, areas: dict[str, AreaInfo], manual: dict[str, list[Ring]]
+) -> FusedFrame:
+    """A floor with no vacuum: only the user's placements, origin (0, 0)."""
+    by_area = _manual_areas(areas, manual)
+    fused_areas = [by_area[k] for k in sorted(by_area)]
+    return FusedFrame(
+        frame_id=frame_id,
+        floor_id=frame_id,
+        name=name,
+        bounds=Rect.union([a.rect for a in fused_areas]) if fused_areas else None,
+        areas=fused_areas,
+        unmapped_rooms=[],
+        overlaps=_overlaps(fused_areas),
+        sources=[],
+    )
+
+
+def _manual_areas(areas: dict[str, AreaInfo], manual: dict[str, list[Ring]]) -> dict[str, FusedArea]:
+    out: dict[str, FusedArea] = {}
+    for area_id, rings in manual.items():
+        info = areas.get(area_id)
+        if info is None or not rings:
+            continue  # area deleted; the manager prunes these
+        out[area_id] = FusedArea(
+            area_id=area_id,
+            name=info.name,
+            polygons=rings,
+            rect=pl.bounds(rings),
+            label_point=pl.label_point(rings),
+            area_m2=pl.area_m2(rings),
+            origin="manual",
+            geometry="manual",
+            sources=[],
+        )
+    return out
 
 
 def _area(info: AreaInfo, rooms: list[SourceRoom], smap: SourceMap, dx: float, dy: float) -> FusedArea:

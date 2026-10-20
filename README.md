@@ -1,6 +1,6 @@
 # Map Fusion
 
-> **Early development.** Phase 1 works: Dreame room outlines, linked to areas, served over the websocket API. No UI yet.
+> **Early development.** Dreame room outlines, linked to areas, served over the websocket API. Areas no vacuum covers can be placed by hand (websocket, services or the integration's options). No map card yet.
 
 Map Fusion is a Home Assistant integration that combines the maps from your robot vacuums into one floor map per floor, with each room linked to a Home Assistant area. Dashboard cards and other integrations can then use a single, consistent map.
 

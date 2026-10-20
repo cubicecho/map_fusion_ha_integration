@@ -1,6 +1,6 @@
 # Fused map document (v1)
 
-Phase 1 implements everything here except user placements (`origin: "manual"`), the write APIs and the services. `map_fusion/get` and `map_fusion/subscribe` are live.
+Live: the document, `map_fusion/get`, `map_fusion/subscribe`, the write APIs and the `set_area`/`clear_area` services (phase 2). Not yet: `get_map`, `transform_point`, `locate_point`, the image entity (phase 4).
 
 What cards and integrations get from Map Fusion. Everything here is a proposal. Change it freely until v1 ships, then bump `SCHEMA_VERSION` (`const.py`) on breaking changes.
 
@@ -103,8 +103,16 @@ All require an admin user. They change only `origin: "manual"` entries. Vacuum r
 
 | Channel | Payload | Effect |
 |---|---|---|
-| WS `map_fusion/area/set` | `{frame_id, area_id, rect: {x, y, width, height}}` or `{…, polygons: [[[x, y], …], …]}` | Create or replace the user placement (a rect is stored as one 4-point ring). Rebuild + push to subscribers |
-| WS `map_fusion/area/clear` | `{frame_id, area_id}` | Remove the user placement. Falls back to the vacuum room, if any, else the area becomes unplaced |
-| Service `map_fusion.set_area` / `map_fusion.clear_area` | Same fields, `area_id` as an area selector | Same |
+| WS `map_fusion/area/set` | `{area_id, frame_id?, rect: {x, y, width, height}}` or `{area_id, frame_id?, polygons: [[[x, y], …], …]}` | Create or replace the user placement (a rect is stored as one 4-point ring). Rebuild + push to subscribers. Returns the area as it appears in the document |
+| WS `map_fusion/area/clear` | `{area_id, frame_id?}` | Remove the user placement. Falls back to the vacuum room, if any, else the area becomes unplaced. Returns `{frame_id}` |
+| Service `map_fusion.set_area` | `area_id` (area selector), `frame_id?`, then `x, y, width, height` or `polygons` | Same as the websocket |
+| Service `map_fusion.clear_area` | `area_id`, `frame_id?` | Same as the websocket |
+| Options flow | Place an area (rectangle), remove a placement, choose a vacuum map's floor | For users without a card editor |
 
-Validation: `width`, `height` > 0. Each ring needs ≥ 3 points and must not cross itself. `area_id` must exist in the area registry. If the area has a floor and the frame belongs to a floor, they must match.
+`frame_id` can be left out: the area's floor frame if the area has a floor, else the only frame. Otherwise the error is `frame_required`. A frame id can be any frame in the document or any HA floor id; a floor with no vacuum becomes a frame holding only placements, with origin (0, 0).
+
+Validation: `width`, `height` > 0. Each ring needs ≥ 3 different points, some area, and must not cross itself (a repeated closing point is dropped). Rings are stored clockwise, largest first, rounded to mm. `area_id` must exist in the area registry. If the area has a floor and the frame belongs to a floor, they must match.
+
+Websocket error codes: `invalid_format` (bad shape or request), `not_found` (area, frame or placement), `frame_required`, `floor_mismatch`, `unauthorized` (not an admin), `not_loaded`.
+
+Placements are stored per frame. If a frame's id changes (its areas get a floor, or the user picks a floor in the options flow), its placements and origin move with it. Deleting an HA area deletes its placements.
