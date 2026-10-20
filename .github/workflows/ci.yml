@@ -21,7 +21,7 @@ jobs:
 
       - name: Install system libraries
         # HA's camera component imports PyTurboJPEG, which needs libturbojpeg.
-        run: sudo apt-get update && sudo apt-get install -y libturbojpeg0
+        run: sudo apt-get update && sudo apt-get install -y libturbojpeg
 
       - name: Install dependencies
         # Not editable (-e): HA's custom-component loader can't read editable
