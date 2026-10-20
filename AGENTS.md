@@ -2,7 +2,7 @@
 
 A Home Assistant custom integration that reads the maps from robot vacuums (Dreame, Xiaomi/Roborock, Valetudo, …), puts them in one shared frame per HA floor (or per vacuum map when areas have no floor), and ties each room to an HA area. Other cards and integrations read the result, a **fused map**, instead of each one parsing vacuum maps itself.
 
-**Status: phase 2 done** (Dreame room polygons over websocket, plus user-placed areas through websocket, services and the options flow). Next: phase 3, presence-map-card reads Map Fusion (in that repo). See [`.agents/plan.md`](.agents/plan.md).
+**Status: phase 2 done** (Dreame room polygons over websocket, plus user-placed areas through websocket, services and the options flow). Phase 3 (presence-map-card reads Map Fusion) is done in that repo. Next: phase 4, more outputs (`get_map`, `transform_point`, `locate_point`, image entity). See [`.agents/plan.md`](.agents/plan.md).
 
 ## Commands
 

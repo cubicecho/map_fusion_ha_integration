@@ -196,7 +196,11 @@ These changes live in the presence-map-card repo. This repo only provides the AP
    - Deleting an HA area deletes its placements.
    - Overlaps between a manual shape and other areas are checked on bounding boxes, not polygons (good enough to flag; exact polygon clipping later if needed).
    - The options flow only does rectangles. Polygons go through the websocket or the service.
-3. **presence-map-card reads Map Fusion** (in that repo).
+3. **presence-map-card reads Map Fusion** ✅ (2026-10-20, presence-map-card v0.4.0, branch `map-fusion` in that repo). Card option `map_fusion: true | { frame, all_areas }`; the card subscribes to `map_fusion/subscribe`, draws outlines (unlinked vacuum rooms dashed), keeps sensors relative to `rect`'s top-left, and tests "inside the area" against the outline with 10 cm slack. Editor: Map Fusion toggle, frame picker, "Place on Map Fusion map" (admins; calls `map_fusion/area/set` with the card's box). Differences from the plan:
+   - All Map Fusion areas in the frame are drawn by default (`all_areas: false` limits it to the card's list). Card `areas[]` add sensors and labels.
+   - Card boxes are used only for areas Map Fusion hasn't placed, and only when the user gave x/y/width/height. Otherwise the card lists them as "Not on the map yet".
+   - No separate migration button: "Place on Map Fusion map" per area does the same job, and the live preview shows the card box against the vacuum rooms so it can be lined up first. Vacuum shapes can't be replaced from the card editor (only manual ones updated).
+   - The card refuses fused documents with a `version` it doesn't know (`SUPPORTED_VERSION` in `src/mapfusion.ts`).
 4. **More outputs.** `map_fusion.get_map`, `transform_point` and `locate_point` services, plus a per-frame `image` entity with `calibration_points`.
 5. **Second source + alignment.** Valetudo first (same parser), then the Xiaomi extractor (bbox only). Fit from shared-area centroids (2+ shared areas → similarity transform; 3+ → least squares with `residual_m`; try mirrored). Merge with `confidence`.
 6. **Extras.** Walls/doors layer in the output, polygon point editing, a repair issue when a source's rooms change.
